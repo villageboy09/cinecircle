@@ -1,5 +1,13 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'job_detail_screen.dart';
+
+const _jobsApiBase = 'https://team.cropsync.in/cine_circle/jobs_api.php';
+
+const _castingFilters = ['All', 'Casting', 'Crew', 'Services', 'Remote'];
+const _dailyFilters   = ['All', 'Lead', 'Supporting', 'Background', 'Child Artist', 'Dancer'];
 
 class JobsScreen extends StatefulWidget {
   const JobsScreen({super.key});
@@ -8,8 +16,109 @@ class JobsScreen extends StatefulWidget {
   State<JobsScreen> createState() => _JobsScreenState();
 }
 
-class _JobsScreenState extends State<JobsScreen> {
-  int _selectedTab = 0; // 0 = Casting, 1 = Daily Short
+class _JobsScreenState extends State<JobsScreen>
+    with SingleTickerProviderStateMixin {
+  int _selectedTab       = 0;
+  int _castingFilter     = 0;
+  int _dailyFilter       = 0;
+  bool _isLoading        = false;
+  List<dynamic> _casting = [];
+  List<dynamic> _daily   = [];
+  final TextEditingController _searchCtrl = TextEditingController();
+  late final PageController _pageCtrl = PageController();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCasting();
+    _fetchDaily();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<String> _getMobile() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('user_phone') ?? '';
+  }
+
+  Future<void> _fetchCasting({String search = ''}) async {
+    setState(() => _isLoading = true);
+    try {
+      final mobile = await _getMobile();
+      final filter = _castingFilter == 0 ? '' : _castingFilters[_castingFilter];
+      final res = await http.get(Uri.parse(
+        '$_jobsApiBase?action=get_casting_jobs&mobile_number=$mobile&job_type=${Uri.encodeComponent(filter)}&search=${Uri.encodeComponent(search)}',
+      ));
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['status'] == 'success') setState(() => _casting = data['data'] ?? []);
+      }
+    } catch (e) {
+      debugPrint('fetchCasting error: $e');
+    }
+    setState(() => _isLoading = false);
+  }
+
+  Future<void> _fetchDaily({String search = ''}) async {
+    setState(() => _isLoading = true);
+    try {
+      final mobile = await _getMobile();
+      final filter = _dailyFilter == 0 ? '' : _dailyFilters[_dailyFilter];
+      final res = await http.get(Uri.parse(
+        '$_jobsApiBase?action=get_daily_posts&mobile_number=$mobile&role_type=${Uri.encodeComponent(filter)}&search=${Uri.encodeComponent(search)}',
+      ));
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['status'] == 'success') setState(() => _daily = data['data'] ?? []);
+      }
+    } catch (e) {
+      debugPrint('fetchDaily error: $e');
+    }
+    setState(() => _isLoading = false);
+  }
+
+  void _switchTab(int index) {
+    if (index == _selectedTab) return;
+    setState(() => _selectedTab = index);
+    _pageCtrl.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  void _openDetail(Map<String, dynamic> job, String jobType) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, anim, _) => JobDetailScreen(
+          jobId: job['id'].toString(),
+          jobType: jobType,
+          onApplied: () {
+            if (jobType == 'casting') {
+              _fetchCasting();
+            } else {
+              _fetchDaily();
+            }
+          },
+        ),
+        transitionsBuilder: (_, anim, _, child) {
+          final slide = Tween<Offset>(
+            begin: const Offset(1.0, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
+          return SlideTransition(position: slide, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 350),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,295 +139,77 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
               child: Row(
                 children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedTab = 0),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: _selectedTab == 0 ? Colors.black : Colors.transparent,
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          'Casting',
-                          style: TextStyle(
-                            fontFamily: 'Google Sans',
-                            fontWeight: FontWeight.w600,
-                            color: _selectedTab == 0 ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedTab = 1),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: _selectedTab == 1 ? Colors.black : Colors.transparent,
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          'Daily Short',
-                          style: TextStyle(
-                            fontFamily: 'Google Sans',
-                            fontWeight: FontWeight.w600,
-                            color: _selectedTab == 1 ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                  _buildToggleTab('Casting', 0),
+                  _buildToggleTab('Daily Short', 1),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 16),
-          // Content
           Expanded(
-            child: _selectedTab == 0 ? _buildCastingView() : _buildDailyView(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCastingView() {
-    final jobs = [
-      {
-        'title': 'Lead Actor for Indie Feature',
-        'company': 'Moonlight Productions',
-        'location': 'Los Angeles, CA',
-        'type': 'Paid - Union',
-        'time': '2d ago',
-        'buttonText': 'Apply',
-      },
-      {
-        'title': 'Cinematographer Needed',
-        'company': 'Visionary Films',
-        'location': 'New York, NY',
-        'type': 'Paid - Non-Union',
-        'time': '1d ago',
-        'buttonText': 'View',
-      },
-      {
-        'title': 'Post-Production Editor',
-        'company': 'Creative Cut Studios',
-        'location': 'Remote',
-        'type': 'Contract',
-        'time': '3d ago',
-        'buttonText': 'Apply',
-      },
-      {
-        'title': 'Production Assistant',
-        'company': 'On-Set Productions',
-        'location': 'Atlanta, GA',
-        'type': 'Entry Level',
-        'time': '5h ago',
-        'buttonText': 'View',
-      },
-    ];
-
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: const Text(
-              'Jobs',
-              style: TextStyle(
-                fontFamily: 'Google Sans',
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: TextField(
-                style: const TextStyle(color: Colors.white, fontFamily: 'Google Sans'),
-                decoration: InputDecoration(
-                  hintText: 'Search jobs...',
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontFamily: 'Google Sans'),
-                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Row(
+            child: PageView(
+              controller: _pageCtrl,
+              physics: const NeverScrollableScrollPhysics(), // only toggle controls it
+              onPageChanged: (i) => setState(() => _selectedTab = i),
               children: [
-                _buildFilterPill('Casting', true),
-                const SizedBox(width: 8),
-                _buildFilterPill('Crew', false),
-                const SizedBox(width: 8),
-                _buildFilterPill('Services', false),
-                const SizedBox(width: 8),
-                _buildFilterPill('Remote', false),
+                RefreshIndicator(
+                  color: Colors.black,
+                  onRefresh: _fetchCasting,
+                  child: _buildCastingView(),
+                ),
+                RefreshIndicator(
+                  color: Colors.black,
+                  onRefresh: _fetchDaily,
+                  child: _buildDailyView(),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          Divider(color: Colors.grey.shade300, height: 1),
-          // Job list
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: jobs.length,
-            separatorBuilder: (context, index) => Divider(color: Colors.grey.shade300, height: 1),
-            itemBuilder: (context, index) {
-              final job = jobs[index];
-              return InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => JobDetailScreen(job: job),
-                    ),
-                  );
-                },
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        job['title']!,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        job['company']!,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 15,
-                          color: Colors.black54,
-                        ),
-                      ),
-                      Text(
-                        job['location']!,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 15,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      Text(
-                        job['type']!,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 15,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            job['time']!,
-                            style: const TextStyle(
-                              fontFamily: 'Google Sans',
-                              fontSize: 14,
-                              color: Colors.black54,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              job['buttonText']!,
-                              style: const TextStyle(
-                                fontFamily: 'Google Sans',
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildDailyView() {
-    final dailyOpportunities = [
-      {
-        'title': 'Need 2 supporting actors for short film',
-        'role': 'Supporting',
-        'type': 'Short Film',
-        'date': 'Oct 26, 2024',
-        'pay': '₹5000/day',
-        'location': 'Mumbai',
-      },
-      {
-        'title': 'Female lead required for ad shoot',
-        'tag': 'URGENT',
-        'role': 'Lead',
-        'type': 'Ad Shoot',
-        'date': 'Oct 27-28, 2024',
-        'pay': '₹15000/day',
-        'location': 'Delhi',
-      },
-      {
-        'title': 'Background artists needed tomorrow',
-        'role': 'Background',
-        'type': 'Feature Film',
-        'date': 'Oct 25, 2024',
-        'pay': '₹2000/day',
-        'location': 'Hyderabad',
-      },
-      {
-        'title': 'Daily dancers for music video',
-        'role': 'Dancer',
-        'type': 'Music Video',
-        'date': 'Oct 29, 2024',
-        'pay': '₹8000/day',
-        'location': 'Bangalore',
-      },
-    ];
-
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          const SizedBox(height: 16),
-          Image.asset(
-            'assets/cinelogo.png',
-            height: 40,
-            fit: BoxFit.contain,
+  Widget _buildToggleTab(String label, int index) {
+    final isSelected = _selectedTab == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => _switchTab(index),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.black : Colors.transparent,
+            borderRadius: BorderRadius.circular(30),
           ),
-          const SizedBox(height: 16),
+          alignment: Alignment.center,
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 200),
+            style: TextStyle(
+              fontFamily: 'Google Sans',
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              color: isSelected ? Colors.white : Colors.black87,
+            ),
+            child: Text(label),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── CASTING TAB ─────────────────────────────────────────
+  Widget _buildCastingView() {
+    return SingleChildScrollView(
+      key: const ValueKey('casting'),
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SizedBox(height: 24),
           const Text(
-            'Daily Actor Needs',
+            'Jobs',
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: 'Google Sans',
               fontSize: 32,
@@ -327,139 +218,267 @@ class _JobsScreenState extends State<JobsScreen> {
               letterSpacing: -0.5,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 4),
+          Text(
+            'Find your next film role',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontFamily: 'Google Sans', fontSize: 14, color: Colors.grey.shade500),
+          ),
+          const SizedBox(height: 20),
+          // Search bar — grey filled, matches Daily's clean look
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: TextField(
+                controller: _searchCtrl,
+                style: const TextStyle(color: Colors.black, fontFamily: 'Google Sans', fontSize: 14),
+                onSubmitted: (v) => _fetchCasting(search: v),
+                decoration: InputDecoration(
+                  hintText: 'Search jobs...',
+                  hintStyle: TextStyle(color: Colors.grey.shade400, fontFamily: 'Google Sans', fontSize: 14),
+                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade500, size: 20),
+                  suffixIcon: _searchCtrl.text.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(Icons.clear, color: Colors.grey.shade500, size: 18),
+                          onPressed: () { _searchCtrl.clear(); setState(() {}); _fetchCasting(); },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Filter pills
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Row(
-              children: [
-                _buildFilterPill('All', true),
-                const SizedBox(width: 8),
-                _buildFilterPill('Lead', false),
-                const SizedBox(width: 8),
-                _buildFilterPill('Supporting', false),
-                const SizedBox(width: 8),
-                _buildFilterPill('Background', false),
-                const SizedBox(width: 8),
-                _buildFilterPill('Child Artist', false),
-                const SizedBox(width: 8),
-                _buildFilterPill('Dancer', false),
-              ],
+              children: _castingFilters.asMap().entries.map((e) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () { setState(() => _castingFilter = e.key); _fetchCasting(); },
+                  child: _buildFilterPill(e.value, e.key == _castingFilter),
+                ),
+              )).toList(),
             ),
           ),
           const SizedBox(height: 16),
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            itemCount: dailyOpportunities.length,
-            itemBuilder: (context, index) {
-              final opp = dailyOpportunities[index];
-              return InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => JobDetailScreen(job: {
-                        'title': opp['title'],
-                        'company': 'Independent Project',
-                        'location': opp['location'],
-                        'time': 'Just now',
-                        'type': opp['type'],
-                      }),
-                    ),
-                  );
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (opp['tag'] != null) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade400),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            opp['tag']!,
-                            style: const TextStyle(
-                              fontFamily: 'Google Sans',
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      Text(
-                        opp['title']!,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '${opp['role']} | ${opp['type']} | ${opp['date']} | ${opp['pay']} | ${opp['location']}',
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 13,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          'Apply Now',
-                          style: TextStyle(
-                            fontFamily: 'Google Sans',
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
+
+          if (_isLoading && _casting.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: Center(child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2)),
+            )
+          else if (_casting.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 60),
+              child: Column(children: [
+                Icon(Icons.work_outline, size: 48, color: Colors.grey.shade300),
+                const SizedBox(height: 12),
+                Text('No jobs found.', style: TextStyle(fontFamily: 'Google Sans', color: Colors.grey.shade500)),
+              ]),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              itemCount: _casting.length,
+              itemBuilder: (_, i) => _buildJobCard(_casting[i], 'casting'),
+            ),
           const SizedBox(height: 32),
         ],
       ),
     );
   }
 
+  // ─── DAILY SHORT TAB ─────────────────────────────────────
+  Widget _buildDailyView() {
+    return SingleChildScrollView(
+      key: const ValueKey('daily'),
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SizedBox(height: 24),
+          const Text(
+            'Daily Actor Needs',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'Google Sans',
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Quick gigs posted daily',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontFamily: 'Google Sans', fontSize: 14, color: Colors.grey.shade500),
+          ),
+          const SizedBox(height: 20),
+          // Filter pills
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: _dailyFilters.asMap().entries.map((e) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () { setState(() => _dailyFilter = e.key); _fetchDaily(); },
+                  child: _buildFilterPill(e.value, e.key == _dailyFilter),
+                ),
+              )).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          if (_isLoading && _daily.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: Center(child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2)),
+            )
+          else if (_daily.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 60),
+              child: Column(children: [
+                Icon(Icons.movie_creation_outlined, size: 48, color: Colors.grey.shade300),
+                const SizedBox(height: 12),
+                Text('No gigs found.', style: TextStyle(fontFamily: 'Google Sans', color: Colors.grey.shade500)),
+              ]),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              itemCount: _daily.length,
+              itemBuilder: (_, i) => _buildJobCard(_daily[i], 'daily'),
+            ),
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  // ─── SHARED CARD ─────────────────────────────────────────
+  Widget _buildJobCard(Map<String, dynamic> job, String jobType) {
+    final bool hasApplied = job['has_applied'] == true;
+    final bool hasImage   = job['image_url'] != null && (job['image_url'] as String).isNotEmpty;
+
+    // Build meta line from available fields
+    final List<String?> metaParts = jobType == 'casting'
+        ? [job['company'], job['pay_type'], job['location'], job['time_ago']]
+        : [job['role_type'], job['project_type'], job['shoot_date'], job['pay_per_day'], job['location']];
+    final meta = metaParts.where((e) => e != null && e.toString().isNotEmpty).join(' | ');
+
+    return GestureDetector(
+      onTap: () => _openDetail(job, jobType),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2)),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Optional banner
+            if (hasImage)
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                child: Image.network(
+                  job['image_url'],
+                  height: 130,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // URGENT badge
+                  if (job['is_urgent'] == true) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade400),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text('URGENT',
+                          style: TextStyle(fontFamily: 'Google Sans', fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  Text(
+                    job['title'] ?? '',
+                    style: const TextStyle(fontFamily: 'Google Sans', fontSize: 17, fontWeight: FontWeight.w600, color: Colors.black),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(meta, style: TextStyle(fontFamily: 'Google Sans', fontSize: 13, color: Colors.grey.shade600, height: 1.4)),
+                  const SizedBox(height: 14),
+                  GestureDetector(
+                    onTap: hasApplied ? null : () => _openDetail(job, jobType),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: hasApplied ? Colors.grey.shade100 : Colors.black,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: hasApplied ? Colors.grey.shade300 : Colors.black),
+                      ),
+                      child: Text(
+                        hasApplied ? 'Applied ✓' : 'Apply Now',
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          color: hasApplied ? Colors.grey.shade500 : Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFilterPill(String title, bool isSelected) {
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: isSelected ? Colors.black : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: isSelected ? Border.all(color: Colors.black) : Border.all(color: Colors.grey.shade400),
+        border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300),
       ),
       child: Text(
         title,
         style: TextStyle(
           fontFamily: 'Google Sans',
-          color: isSelected ? Colors.white : Colors.black,
-          fontSize: 14,
+          color: isSelected ? Colors.white : Colors.black87,
+          fontSize: 13,
           fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
         ),
       ),

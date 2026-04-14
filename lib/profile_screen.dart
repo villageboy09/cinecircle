@@ -26,6 +26,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _userName = 'Loading...';
   String _accountType = 'Loading...';
   String _userPhone = '';
+  int _followersCount = 0;
+  int _followingCount = 0;
 
   @override
   void initState() {
@@ -65,6 +67,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   'Public';
               _userPhone = mobile;
             });
+            // Fetch follow counts after profile data is available (needs id)
+            _loadFollowCounts(mobile);
           }
           return;
         }
@@ -80,6 +84,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _userPhone = mobile;
       });
     }
+
+    // Fetch follow counts from social API
+    _loadFollowCounts(mobile);
+  }
+
+  Future<void> _loadFollowCounts(String mobile) async {
+    try {
+      // We need our own userId — get it from profile data
+      final myId = _profileData?['id'];
+      if (myId == null) return;
+      final res = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/social_api.php?action=get_follow_state&mobile_number=$mobile&target_user_id=$myId',
+        ),
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['status'] == 'success' && mounted) {
+          setState(() {
+            _followersCount = data['followers'] ?? 0;
+            _followingCount = data['following'] ?? 0;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -87,355 +116,399 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.grey.shade300, width: 2),
-                      image:
-                          _profileData != null &&
-                                  _profileData!['profile_image_url'] != null &&
-                                  _profileData!['profile_image_url'].isNotEmpty
-                              ? DecorationImage(
-                                  image: CachedNetworkImageProvider(
-                                    _profileData!['profile_image_url'],
-                                  ),
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
-                    ),
-                    child:
-                        (_profileData == null ||
-                                _profileData!['profile_image_url'] == null ||
-                                _profileData!['profile_image_url'].isEmpty)
-                            ? const Icon(Icons.person, size: 40, color: Colors.grey)
-                            : null,
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        // Left Side
-                        Flexible(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      _userName,
-                                      style: const TextStyle(
-                                        fontFamily: 'Google Sans',
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.black,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  const Icon(Icons.verified, color: Colors.black, size: 16),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _accountType,
-                                style: const TextStyle(
-                                  fontFamily: 'Google Sans',
-                                  fontSize: 14,
-                                  color: Colors.black87,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
+        child: RefreshIndicator(
+          color: Colors.black,
+          onRefresh: _loadUserData,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 20),
+                // Header
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.grey.shade300,
+                          width: 2,
                         ),
-                        const SizedBox(width: 24),
-                        // Right Side
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
+                        image:
+                            _profileData != null &&
+                                _profileData!['profile_image_url'] != null &&
+                                _profileData!['profile_image_url'].isNotEmpty
+                            ? DecorationImage(
+                                image: CachedNetworkImageProvider(
+                                  _profileData!['profile_image_url'],
+                                ),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
+                      ),
+                      child:
+                          (_profileData == null ||
+                              _profileData!['profile_image_url'] == null ||
+                              _profileData!['profile_image_url'].isEmpty)
+                          ? const Icon(
+                              Icons.person,
+                              size: 40,
+                              color: Colors.grey,
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          // Left Side
+                          Flexible(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(Icons.location_on_outlined, size: 14, color: Colors.grey.shade700),
-                                const SizedBox(width: 4),
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        _userName,
+                                        style: const TextStyle(
+                                          fontFamily: 'Google Sans',
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.black,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(
+                                      Icons.verified,
+                                      color: Colors.black,
+                                      size: 16,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
                                 Text(
-                                  _profileData?['city']?.isNotEmpty == true
-                                      ? _profileData!['city']!
-                                      : 'Not specified',
-                                  style: TextStyle(
+                                  _accountType,
+                                  style: const TextStyle(
                                     fontFamily: 'Google Sans',
-                                    fontSize: 12,
-                                    color: Colors.grey.shade700,
+                                    fontSize: 14,
+                                    color: Colors.black87,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            if (_userPhone.isNotEmpty)
+                          ),
+                          const SizedBox(width: 24),
+                          // Right Side
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.phone_outlined, size: 14, color: Colors.grey.shade700),
+                                  Icon(
+                                    Icons.location_on_outlined,
+                                    size: 14,
+                                    color: Colors.grey.shade700,
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    _userPhone,
+                                    _profileData?['city']?.isNotEmpty == true
+                                        ? _profileData!['city']!
+                                        : 'Not specified',
                                     style: TextStyle(
                                       fontFamily: 'Google Sans',
                                       fontSize: 12,
                                       color: Colors.grey.shade700,
                                     ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ],
                               ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              // Edit Profile Button
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    final result = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const EditProfileScreen(),
+                              const SizedBox(height: 4),
+                              if (_userPhone.isNotEmpty)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.phone_outlined,
+                                      size: 14,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      _userPhone,
+                                      style: TextStyle(
+                                        fontFamily: 'Google Sans',
+                                        fontSize: 12,
+                                        color: Colors.grey.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ],
                       ),
-                    );
-                    if (result == true) {
-                      _loadUserData();
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Colors.grey.shade300),
                     ),
-                    elevation: 0,
-                  ),
-                  child: const Text(
-                    'Edit Profile',
-                    style: TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 24),
-              // Stats
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildStat('15', 'Projects', Icons.description_outlined),
-                  Container(height: 40, width: 1, color: Colors.grey.shade300),
-                  _buildStat('42', 'Credits', Icons.video_library_outlined),
-                  Container(height: 40, width: 1, color: Colors.grey.shade300),
-                  _buildStat('1.2k', 'Followers', Icons.people_outline),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Divider(color: Colors.grey.shade200),
-              const SizedBox(height: 16),
-              // About
-              const Text(
-                'About',
-                style: TextStyle(
-                  fontFamily: 'Google Sans',
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _profileData?['bio']?.isNotEmpty == true
-                    ? _profileData!['bio']!
-                    : 'Write a bit about yourself and your journey.',
-                style: const TextStyle(
-                  fontFamily: 'Google Sans',
-                  fontSize: 15,
-                  color: Colors.black87,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Divider(color: Colors.grey.shade200),
-              const SizedBox(height: 16),
-              // Featured Reel Divider & Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Featured Reel',
-                    style: TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.add_circle_outline,
-                      color: Colors.black,
-                    ),
-                    onPressed: () => _showAddReelBottomSheet(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 160,
-                child: _reelsList.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No featured reels added.',
-                          style: TextStyle(fontFamily: 'Google Sans'),
+                const SizedBox(height: 24),
+                // Edit Profile Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const EditProfileScreen(),
                         ),
-                      )
-                    : ListView.separated(
-                        physics: const BouncingScrollPhysics(),
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _reelsList.length,
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(width: 16),
-                        itemBuilder: (context, index) {
-                          return _buildReelCard(_reelsList[index]);
-                        },
+                      );
+                      if (result == true) {
+                        _loadUserData();
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade300),
                       ),
-              ),
-              const SizedBox(height: 16),
-              Divider(color: Colors.grey.shade200),
-              const SizedBox(height: 16),
-              // Credits Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Credits',
-                    style: TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Edit Profile',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.add_circle_outline,
-                      color: Colors.black,
+                ),
+                const SizedBox(height: 24),
+                // Stats
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildStat(
+                      '${_creditsList.length}',
+                      'Credits',
+                      Icons.video_library_outlined,
                     ),
-                    onPressed: () => _showAddCreditBottomSheet(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              if (_creditsList.isEmpty)
+                    Container(
+                      height: 40,
+                      width: 1,
+                      color: Colors.grey.shade300,
+                    ),
+                    _buildStat(
+                      '$_followersCount',
+                      'Followers',
+                      Icons.people_outline,
+                    ),
+                    Container(
+                      height: 40,
+                      width: 1,
+                      color: Colors.grey.shade300,
+                    ),
+                    _buildStat(
+                      '$_followingCount',
+                      'Following',
+                      Icons.person_outline,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Divider(color: Colors.grey.shade200),
+                const SizedBox(height: 16),
+                // About
                 const Text(
-                  'No credits added yet.',
-                  style: TextStyle(fontFamily: 'Google Sans'),
+                  'About',
+                  style: TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
                 ),
-              ..._creditsList.map((c) {
-                final title = c['project_title'] ?? '';
-                final role = c['role'] ?? '';
-                final year = c['year'] != null ? ' (${c['year']})' : '';
-                return _buildCreditItem('$role - "$title"$year');
-              }),
-              const SizedBox(height: 16),
-              Divider(color: Colors.grey.shade200),
-              const SizedBox(height: 16),
-              // Skills Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
+                const SizedBox(height: 12),
+                Text(
+                  _profileData?['bio']?.isNotEmpty == true
+                      ? _profileData!['bio']!
+                      : 'Write a bit about yourself and your journey.',
+                  style: const TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontSize: 15,
+                    color: Colors.black87,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Divider(color: Colors.grey.shade200),
+                const SizedBox(height: 16),
+                // Featured Reel Divider & Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Featured Reel',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.add_circle_outline,
+                        color: Colors.black,
+                      ),
+                      onPressed: () => _showAddReelBottomSheet(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 160,
+                  child: _reelsList.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'No featured reels added.',
+                            style: TextStyle(fontFamily: 'Google Sans'),
+                          ),
+                        )
+                      : ListView.separated(
+                          physics: const BouncingScrollPhysics(),
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _reelsList.length,
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(width: 16),
+                          itemBuilder: (context, index) {
+                            return _buildReelCard(_reelsList[index]);
+                          },
+                        ),
+                ),
+                const SizedBox(height: 16),
+                Divider(color: Colors.grey.shade200),
+                const SizedBox(height: 16),
+                // Credits Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Credits',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.add_circle_outline,
+                        color: Colors.black,
+                      ),
+                      onPressed: () => _showAddCreditBottomSheet(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (_creditsList.isEmpty)
                   const Text(
-                    'Skills',
-                    style: TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                    'No credits added yet.',
+                    style: TextStyle(fontFamily: 'Google Sans'),
+                  ),
+                ..._creditsList.map((c) {
+                  final title = c['project_title'] ?? '';
+                  final role = c['role'] ?? '';
+                  final year = c['year'] != null ? ' (${c['year']})' : '';
+                  return _buildCreditItem('$role - "$title"$year');
+                }),
+                const SizedBox(height: 16),
+                Divider(color: Colors.grey.shade200),
+                const SizedBox(height: 16),
+                // Skills Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Skills',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.add_circle_outline,
+                        color: Colors.black,
+                      ),
+                      onPressed: () => _showAddSkillBottomSheet(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _skillsList.isEmpty
+                    ? const Text(
+                        'No skills added yet.',
+                        style: TextStyle(fontFamily: 'Google Sans'),
+                      )
+                    : Wrap(
+                        spacing: 8,
+                        runSpacing: 12,
+                        children: _skillsList
+                            .map((s) => _buildSkillChip(s['skill_name'] ?? ''))
+                            .toList(),
+                      ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () => _showLogoutBottomSheet(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade50,
+                      foregroundColor: Colors.red,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.red.shade200),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Log Out',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.add_circle_outline,
-                      color: Colors.black,
-                    ),
-                    onPressed: () => _showAddSkillBottomSheet(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              _skillsList.isEmpty
-                  ? const Text(
-                      'No skills added yet.',
-                      style: TextStyle(fontFamily: 'Google Sans'),
-                    )
-                  : Wrap(
-                      spacing: 8,
-                      runSpacing: 12,
-                      children: _skillsList
-                           .map((s) => _buildSkillChip(s['skill_name'] ?? ''))
-                           .toList(),
-                     ),
-               const SizedBox(height: 32),
-               SizedBox(
-                 width: double.infinity,
-                 height: 48,
-                 child: ElevatedButton(
-                   onPressed: () => _showLogoutBottomSheet(),
-                   style: ElevatedButton.styleFrom(
-                     backgroundColor: Colors.red.shade50,
-                     foregroundColor: Colors.red,
-                     shape: RoundedRectangleBorder(
-                       borderRadius: BorderRadius.circular(12),
-                       side: BorderSide(color: Colors.red.shade200),
-                     ),
-                     elevation: 0,
-                   ),
-                   child: const Text(
-                     'Log Out',
-                     style: TextStyle(
-                       fontFamily: 'Google Sans',
-                       fontSize: 16,
-                       fontWeight: FontWeight.w600,
-                     ),
-                   ),
-                 ),
-               ),
-               const SizedBox(height: 48),
-            ],
+                ),
+                const SizedBox(height: 48),
+              ],
+            ),
           ),
         ),
       ),
@@ -923,7 +996,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    url.isNotEmpty ? ReelThumbnail(videoUrl: url) : const SizedBox.shrink(),
+                    url.isNotEmpty
+                        ? ReelThumbnail(videoUrl: url)
+                        : const SizedBox.shrink(),
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.black26,
@@ -1008,7 +1083,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _showLogoutBottomSheet() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) {
         return Padding(
           padding: const EdgeInsets.all(24.0),
@@ -1019,13 +1096,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 16),
               const Text(
                 'Log Out',
-                style: TextStyle(fontFamily: 'Google Sans', fontSize: 22, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
                 'Are you sure you want to log out of CineCircle?',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontFamily: 'Google Sans', fontSize: 16, color: Colors.black54),
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 16,
+                  color: Colors.black54,
+                ),
               ),
               const SizedBox(height: 24),
               Row(
@@ -1033,12 +1118,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Expanded(
                     child: OutlinedButton(
                       style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         side: BorderSide(color: Colors.grey.shade300),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel', style: TextStyle(color: Colors.black, fontFamily: 'Google Sans', fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontFamily: 'Google Sans',
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -1046,20 +1140,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       onPressed: () async {
                         final prefs = await SharedPreferences.getInstance();
                         await prefs.clear();
                         if (context.mounted) {
-                           Navigator.of(context).pushAndRemoveUntil(
-                             MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                             (Route<dynamic> route) => false,
-                           );
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(
+                              builder: (context) => const WelcomeScreen(),
+                            ),
+                            (Route<dynamic> route) => false,
+                          );
                         }
                       },
-                      child: const Text('Log Out', style: TextStyle(color: Colors.white, fontFamily: 'Google Sans', fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Log Out',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'Google Sans',
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1067,7 +1172,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         );
-      }
+      },
     );
   }
 }
@@ -1088,15 +1193,17 @@ class _ReelThumbnailState extends State<ReelThumbnail> {
   void initState() {
     super.initState();
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        if (mounted) {
-          setState(() {
-            _initialized = true;
+      ..initialize()
+          .then((_) {
+            if (mounted) {
+              setState(() {
+                _initialized = true;
+              });
+            }
+          })
+          .catchError((e) {
+            // Ignored, thumbnail just remains grey wrapper
           });
-        }
-      }).catchError((e) {
-        // Ignored, thumbnail just remains grey wrapper
-      });
   }
 
   @override
@@ -1112,7 +1219,10 @@ class _ReelThumbnailState extends State<ReelThumbnail> {
         child: SizedBox(
           width: 20,
           height: 20,
-          child: CircularProgressIndicator(color: Colors.white24, strokeWidth: 2),
+          child: CircularProgressIndicator(
+            color: Colors.white24,
+            strokeWidth: 2,
+          ),
         ),
       );
     }

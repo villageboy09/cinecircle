@@ -44,6 +44,7 @@ try {
     $postsStmt = $pdo->prepare("
         SELECT 
             p.id, 
+            p.user_id,
             p.category, 
             p.title, 
             p.description, 
@@ -64,29 +65,37 @@ try {
     $postsStmt->execute([$userId]);
     $posts = $postsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 3. Fetch Trending Talent (Placeholder randomized)
+    // 3. Fetch Trending Talent (Exclude self + check is_following)
     $trendingStmt = $pdo->prepare("
-        SELECT id, full_name, role_title, city, profile_image_url 
+        SELECT id, full_name, role_title, city, profile_image_url,
+               EXISTS(SELECT 1 FROM user_follows WHERE follower_id = ? AND following_id = cinecircle.id) as is_following
         FROM cinecircle 
+        WHERE id != ?
         ORDER BY RAND() 
         LIMIT 5
     ");
-    $trendingStmt->execute();
+    $trendingStmt->execute([$userId, $userId]);
     $trending = $trendingStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 4. Fetch Nearby Creators
+    // 4. Fetch Nearby Creators (Check is_following)
     $nearbyStmt = $pdo->prepare("
-        SELECT id, full_name, role_title, city, profile_image_url 
+        SELECT id, full_name, role_title, city, profile_image_url,
+               EXISTS(SELECT 1 FROM user_follows WHERE follower_id = ? AND following_id = cinecircle.id) as is_following
         FROM cinecircle 
         WHERE city = ? AND id != ?
         LIMIT 4
     ");
-    $nearbyStmt->execute([$userCity, $userId]);
+    $nearbyStmt->execute([$userId, $userCity, $userId]);
     $nearby = $nearbyStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Convert is_following to boolean
+    foreach ($trending as &$t) $t['is_following'] = (bool)$t['is_following'];
+    foreach ($nearby as &$n) $n['is_following'] = (bool)$n['is_following'];
 
     echo json_encode([
         "status" => "success",
         "data" => [
+            "current_user_id" => $userId,
             "posts" => $posts,
             "trending" => $trending,
             "nearby" => $nearby
