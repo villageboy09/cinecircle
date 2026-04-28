@@ -1,0 +1,1 @@
+=" social_api.php\; =[System.IO.File]::ReadAllText(); =.IndexOf(\/* SOCIAL CREDITS START */\); if( -gt 0){=.Substring(0,); [System.IO.File]::WriteAllText(,)}

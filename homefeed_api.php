@@ -56,13 +56,15 @@ try {
             u.profile_image_url,
             (SELECT COUNT(*) FROM feed_likes WHERE post_id = p.id) as likes_count,
             (SELECT COUNT(*) FROM feed_comments WHERE post_id = p.id) as comments_count,
-            EXISTS(SELECT 1 FROM feed_likes WHERE post_id = p.id AND user_id = ?) as is_liked
+            (SELECT COUNT(*) FROM feed_views WHERE post_id = p.id) as views_count,
+            EXISTS(SELECT 1 FROM feed_likes WHERE post_id = p.id AND user_id = ?) as is_liked,
+            EXISTS(SELECT 1 FROM feed_saves WHERE post_id = p.id AND user_id = ?) as is_saved
         FROM feed_posts p
         JOIN cinecircle u ON p.user_id = u.id
         ORDER BY p.created_at DESC
         LIMIT 50
     ");
-    $postsStmt->execute([$userId]);
+    $postsStmt->execute([$userId, $userId]);
     $posts = $postsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // 3. Fetch Trending Talent (Exclude self + check is_following)

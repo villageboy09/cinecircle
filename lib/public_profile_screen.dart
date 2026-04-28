@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'chat_screen.dart';
+import 'followers_screen.dart';
 
 const _socialApiPub = 'https://team.cropsync.in/cine_circle/social_api.php';
 
@@ -248,9 +249,33 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _buildStat('${p['followers'] ?? 0}', 'Followers'),
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FollowersScreen(
+                      targetUserId: widget.userId,
+                      displayName: p['full_name'] ?? '',
+                      initialTab: 0,
+                    ),
+                  ),
+                ).then((_) => _fetchProfile()),
+                child: _buildStat('${p['followers'] ?? 0}', 'Followers'),
+              ),
               Container(height: 36, width: 1, color: Colors.grey.shade300),
-              _buildStat('${p['following'] ?? 0}', 'Following'),
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FollowersScreen(
+                      targetUserId: widget.userId,
+                      displayName: p['full_name'] ?? '',
+                      initialTab: 1,
+                    ),
+                  ),
+                ).then((_) => _fetchProfile()),
+                child: _buildStat('${p['following'] ?? 0}', 'Following'),
+              ),
               Container(height: 36, width: 1, color: Colors.grey.shade300),
               _buildStat('${credits.length}', 'Credits'),
             ],

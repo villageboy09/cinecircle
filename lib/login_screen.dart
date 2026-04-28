@@ -51,6 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
          await prefs.setString('user_name', user['full_name'] ?? 'User');
          await prefs.setString('user_phone', user['mobile_number'] ?? phone);
          await prefs.setString('account_type', user['account_type'] ?? 'Public');
+         debugPrint('Saved user_phone: ${user['mobile_number']}');
 
          if (!mounted) return;
          Navigator.pushReplacement(

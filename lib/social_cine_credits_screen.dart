@@ -1,19 +1,19 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'redeem_rewards_screen.dart';
+import 'social_redeem_rewards_screen.dart';
 
-const _creditsApiBase = 'https://team.cropsync.in/cine_circle/trivia_api.php';
+const _creditsApiBase = 'https://team.cropsync.in/cine_circle/social_api.php';
 
-class CineCreditsScreen extends StatefulWidget {
-  const CineCreditsScreen({super.key});
+class SocialCineCreditsScreen extends StatefulWidget {
+  const SocialCineCreditsScreen({super.key});
 
   @override
-  State<CineCreditsScreen> createState() => _CineCreditsScreenState();
+  State<SocialCineCreditsScreen> createState() => _SocialCineCreditsScreenState();
 }
 
-class _CineCreditsScreenState extends State<CineCreditsScreen> {
+class _SocialCineCreditsScreenState extends State<SocialCineCreditsScreen> {
   bool _isLoading = true;
   int _balance = 0;
   int _totalEarned = 0;
@@ -140,13 +140,13 @@ class _CineCreditsScreenState extends State<CineCreditsScreen> {
               : Column(
                   children: [
                     // Title & Balance
-                    const Text('Cine-Credits',
+                    const Text('Social Credits',
                         style: TextStyle(fontFamily: 'Google Sans', fontSize: 28, color: Colors.black)),
                     const SizedBox(height: 24),
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 400),
                       child: Text(
-                        '$_balance Cine-Credits',
+                        '$_balance Social Credits',
                         key: ValueKey(_balance),
                         style: const TextStyle(fontFamily: 'Google Sans', fontSize: 36, fontWeight: FontWeight.bold, color: Colors.black),
                       ),
@@ -213,7 +213,7 @@ class _CineCreditsScreenState extends State<CineCreditsScreen> {
                       child: ElevatedButton(
                         onPressed: () => Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => RedeemRewardsScreen(balance: _balance)),
+                          MaterialPageRoute(builder: (_) => SocialRedeemRewardsScreen(balance: _balance)),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.black,

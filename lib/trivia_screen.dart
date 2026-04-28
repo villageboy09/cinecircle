@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -372,7 +372,7 @@ class _TriviaScreenState extends State<TriviaScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     child: Text(
-                      isCompleted ? 'Completed ✓' : 'Start Trivia (+$credits credits)',
+                      isCompleted ? 'Completed Ô£ô' : 'Start Trivia (+$credits credits)',
                       style: const TextStyle(fontFamily: 'Google Sans', fontSize: 16, fontWeight: FontWeight.w600),
                     ),
                   ),

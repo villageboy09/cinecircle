@@ -102,6 +102,76 @@ try {
 
         echo json_encode(["status" => "success", "data" => $comments]);
     }
+    elseif ($action === 'save_post') {
+        $postId = $_POST['post_id'] ?? '';
+        if (!$postId) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "post_id required"]);
+            exit();
+        }
+
+        // Check if already saved
+        $checkStmt = $pdo->prepare("SELECT 1 FROM feed_saves WHERE user_id = ? AND post_id = ?");
+        $checkStmt->execute([$userId, $postId]);
+
+        if ($checkStmt->fetchColumn()) {
+            // Unsave
+            $delStmt = $pdo->prepare("DELETE FROM feed_saves WHERE user_id = ? AND post_id = ?");
+            $delStmt->execute([$userId, $postId]);
+            echo json_encode(["status" => "success", "message" => "Post unsaved", "is_saved" => false]);
+        } else {
+            // Save
+            $insStmt = $pdo->prepare("INSERT INTO feed_saves (user_id, post_id) VALUES (?, ?)");
+            $insStmt->execute([$userId, $postId]);
+            echo json_encode(["status" => "success", "message" => "Post saved", "is_saved" => true]);
+        }
+    }
+    elseif ($action === 'view_post') {
+        $postId = $_POST['post_id'] ?? '';
+        if (!$postId) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "post_id required"]);
+            exit();
+        }
+
+        // Only record unique views (one per user per post)
+        $checkStmt = $pdo->prepare("SELECT 1 FROM feed_views WHERE user_id = ? AND post_id = ?");
+        $checkStmt->execute([$userId, $postId]);
+
+        if (!$checkStmt->fetchColumn()) {
+            $insStmt = $pdo->prepare("INSERT INTO feed_views (user_id, post_id) VALUES (?, ?)");
+            $insStmt->execute([$userId, $postId]);
+        }
+
+        // Return current view count
+        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM feed_views WHERE post_id = ?");
+        $countStmt->execute([$postId]);
+        $viewCount = (int)$countStmt->fetchColumn();
+
+        echo json_encode(["status" => "success", "views_count" => $viewCount]);
+    }
+    elseif ($action === 'get_saved_posts') {
+        $stmt = $pdo->prepare("
+            SELECT 
+                p.id, p.user_id, p.category, p.title, p.description,
+                p.media_url, p.media_type, p.created_at,
+                u.full_name as author_name, u.role_title, u.profile_image_url,
+                (SELECT COUNT(*) FROM feed_likes WHERE post_id = p.id) as likes_count,
+                (SELECT COUNT(*) FROM feed_comments WHERE post_id = p.id) as comments_count,
+                (SELECT COUNT(*) FROM feed_views WHERE post_id = p.id) as views_count,
+                EXISTS(SELECT 1 FROM feed_likes WHERE post_id = p.id AND user_id = ?) as is_liked,
+                1 as is_saved
+            FROM feed_saves s
+            JOIN feed_posts p ON s.post_id = p.id
+            JOIN cinecircle u ON p.user_id = u.id
+            WHERE s.user_id = ?
+            ORDER BY p.created_at DESC
+        ");
+        $stmt->execute([$userId, $userId]);
+        $savedPosts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode(["status" => "success", "data" => $savedPosts]);
+    }
     else {
         http_response_code(400);
         echo json_encode(["status" => "error", "message" => "Invalid action"]);

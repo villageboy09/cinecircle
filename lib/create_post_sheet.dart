@@ -7,6 +7,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+// ── Aspect ratio options ────────────────────────────────────────────────────
+class _AspectOption {
+  final String label;
+  final String sublabel;
+  final double? ratio; // null = original (no crop)
+  final IconData icon;
+
+  const _AspectOption({
+    required this.label,
+    required this.sublabel,
+    required this.ratio,
+    required this.icon,
+  });
+}
+
+const _aspectOptions = <_AspectOption>[
+  _AspectOption(label: '1:1', sublabel: 'Square', ratio: 1.0,    icon: Icons.crop_square),
+  _AspectOption(label: '4:5', sublabel: 'Portrait', ratio: 4/5,  icon: Icons.crop_portrait),
+  _AspectOption(label: '16:9', sublabel: 'Wide', ratio: 16/9,    icon: Icons.crop_landscape),
+  _AspectOption(label: 'Full', sublabel: 'Original', ratio: null, icon: Icons.crop_free),
+];
+
 class CreatePostSheet extends StatefulWidget {
   const CreatePostSheet({super.key});
 
@@ -16,207 +38,273 @@ class CreatePostSheet extends StatefulWidget {
 
 class _CreatePostSheetState extends State<CreatePostSheet> {
   final _titleController = TextEditingController();
-  final _descController = TextEditingController();
-  String _category = 'Project Update';
-  File? _mediaFile;
+  final _descController  = TextEditingController();
+
+  String _category  = 'Project Update';
+  File?  _rawFile;       // original picked file (no crop applied)
+  File?  _displayFile;   // file used for preview / upload (cropped copy)
   String _mediaType = 'image';
-  bool _isPosting = false;
+  bool   _isPosting = false;
+  int    _selectedRatioIndex = 1; // default: 4:5 Portrait
 
   final List<String> _categories = [
     'Project Update',
     'Casting Call',
     'Screening Room',
     'Behind the Scenes',
-    'Other'
+    'Community Highlight',
   ];
 
-  Future<void> _pickMedia(ImageSource source, bool isVideo) async {
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descController.dispose();
+    super.dispose();
+  }
+
+  // ── Media picking ───────────────────────────────────────────────────────
+  Future<void> _pickMedia(bool isVideo) async {
     final picker = ImagePicker();
-    XFile? pickedFile;
-    
+    XFile? picked;
     if (isVideo) {
-      pickedFile = await picker.pickVideo(source: source);
+      picked = await picker.pickVideo(source: ImageSource.gallery);
     } else {
-      pickedFile = await picker.pickImage(source: source);
+      picked = await picker.pickImage(source: ImageSource.gallery);
     }
+    if (picked == null) return;
 
-    if (pickedFile != null) {
-      File file = File(pickedFile.path);
-      if (!isVideo) {
-        file = await _autoCropIfNecessary(file);
-      }
+    final raw = File(picked.path);
+    setState(() {
+      _rawFile   = raw;
+      _mediaType = isVideo ? 'video' : 'image';
+    });
 
-      setState(() {
-        _mediaFile = file;
-        _mediaType = isVideo ? 'video' : 'image';
-      });
+    if (!isVideo) {
+      await _applyRatio(_aspectOptions[_selectedRatioIndex].ratio);
+    } else {
+      setState(() => _displayFile = raw);
     }
   }
 
-  Future<File> _autoCropIfNecessary(File originalFile) async {
+  // ── Crop / resize to chosen ratio ────────────────────────────────────────
+  Future<void> _applyRatio(double? ratio) async {
+    if (_rawFile == null || _mediaType != 'image') return;
+
+    if (ratio == null) {
+      // Original — no crop
+      setState(() => _displayFile = _rawFile);
+      return;
+    }
+
     try {
-      final Uint8List bytes = await originalFile.readAsBytes();
-      img.Image? decodedImage = img.decodeImage(bytes);
-      if (decodedImage == null) return originalFile;
+      final Uint8List bytes = await _rawFile!.readAsBytes();
+      img.Image? decoded = img.decodeImage(bytes);
+      if (decoded == null) { setState(() => _displayFile = _rawFile); return; }
 
-      final double currentAspect = decodedImage.width / decodedImage.height;
-      const double targetAspect = 4 / 5;
+      final double current = decoded.width / decoded.height;
 
-      if (currentAspect > targetAspect) {
-        final int targetWidth = (decodedImage.height * targetAspect).toInt();
-        final int offsetX = (decodedImage.width - targetWidth) ~/ 2;
-        
-        final img.Image cropped = img.copyCrop(
-          decodedImage,
-          x: offsetX,
-          y: 0,
-          width: targetWidth,
-          height: decodedImage.height,
-        );
-        
-        final Directory tempDir = await getTemporaryDirectory();
-        final String path = '${tempDir.path}/cropped_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final File croppedFile = File(path)..writeAsBytesSync(img.encodeJpg(cropped, quality: 90));
-        return croppedFile;
+      img.Image cropped;
+      if ((current - ratio).abs() < 0.01) {
+        cropped = decoded; // already correct
+      } else if (current > ratio) {
+        // Too wide → trim sides
+        final int w = (decoded.height * ratio).toInt();
+        final int x = (decoded.width - w) ~/ 2;
+        cropped = img.copyCrop(decoded, x: x, y: 0, width: w, height: decoded.height);
+      } else {
+        // Too tall → trim top/bottom
+        final int h = (decoded.width / ratio).toInt();
+        final int y = (decoded.height - h) ~/ 2;
+        cropped = img.copyCrop(decoded, x: 0, y: y, width: decoded.width, height: h);
       }
+
+      final dir  = await getTemporaryDirectory();
+      final path = '${dir.path}/post_${ratio.toStringAsFixed(2)}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final file = File(path)..writeAsBytesSync(img.encodeJpg(cropped, quality: 90));
+      if (mounted) setState(() => _displayFile = file);
     } catch (e) {
-      debugPrint('Auto-crop error: $e');
+      debugPrint('Crop error: $e');
+      setState(() => _displayFile = _rawFile);
     }
-    return originalFile;
   }
 
+  Future<void> _onRatioSelected(int idx) async {
+    setState(() => _selectedRatioIndex = idx);
+    await _applyRatio(_aspectOptions[idx].ratio);
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────────
   Future<void> _submitPost() async {
     if (_titleController.text.trim().isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please add a title')));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please add a headline')),
+      );
       return;
     }
 
     setState(() => _isPosting = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs  = await SharedPreferences.getInstance();
       final mobile = prefs.getString('user_phone') ?? '';
 
-      var request = http.MultipartRequest(
+      final req = http.MultipartRequest(
         'POST',
         Uri.parse('https://team.cropsync.in/cine_circle/social_api.php'),
       );
+      req.fields['action']       = 'create_post';
+      req.fields['mobile_number'] = mobile;
+      req.fields['category']     = _category;
+      req.fields['title']        = _titleController.text.trim();
+      req.fields['description']  = _descController.text.trim();
+      req.fields['media_type']   = _mediaType;
 
-      request.fields['action'] = 'create_post';
-      request.fields['mobile_number'] = mobile;
-      request.fields['category'] = _category;
-      request.fields['title'] = _titleController.text.trim();
-      request.fields['description'] = _descController.text.trim();
-      request.fields['media_type'] = _mediaType;
-
-      if (_mediaFile != null) {
-        request.files.add(await http.MultipartFile.fromPath('media', _mediaFile!.path));
+      final uploadFile = _displayFile ?? _rawFile;
+      if (uploadFile != null) {
+        req.files.add(await http.MultipartFile.fromPath('media', uploadFile.path));
       }
 
-      var streamedResponse = await request.send();
-      var response = await http.Response.fromStream(streamedResponse);
+      final streamed  = await req.send();
+      final response  = await http.Response.fromStream(streamed);
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
-        if (mounted) Navigator.pop(context, true);
+        await _awardCredits(mobile);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(children: [
+              Icon(Icons.stars_rounded, color: Colors.amber, size: 20),
+              SizedBox(width: 10),
+              Text('Posted! You earned 10 CineCredits 🎬',
+                  style: TextStyle(fontFamily: 'Google Sans')),
+            ]),
+            backgroundColor: Colors.black,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+        Navigator.pop(context, true);
       } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${response.statusCode}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed (${response.statusCode})')),
+        );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
     } finally {
       if (mounted) setState(() => _isPosting = false);
     }
   }
 
+  Future<void> _awardCredits(String mobile) async {
+    try {
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/social_api.php'),
+        body: {
+          'action': 'award_social_credits',
+          'mobile_number': mobile,
+          'amount': '10',
+          'activity': 'POST_CREATED',
+          'description': 'Created a new post in Circle',
+        },
+      );
+    } catch (_) {}
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
     return Container(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(bottom: bottomInset),
       decoration: const BoxDecoration(
         color: Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+      child: SafeArea(
+        top: false,
         child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Drag Handle
+              // ── Drag handle ──
               Center(
                 child: Container(
-                  width: 40,
-                  height: 4,
+                  width: 36, height: 4,
                   decoration: BoxDecoration(
                     color: Colors.grey.shade300,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
-              
+              const SizedBox(height: 20),
+
+              // ── Header ──
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                   Text(
-                    'Create Post',
-                    style: TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.grey.shade900,
+                  const Expanded(
+                    child: Text(
+                      'New Post',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black,
+                      ),
                     ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: Icon(Icons.close, color: Colors.grey.shade600),
-                    style: IconButton.styleFrom(backgroundColor: Colors.grey.shade200),
+                    icon: const Icon(Icons.close, size: 22),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.grey.shade200,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.all(8),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              
-              // Category Selection (Premium Horizontal List)
-              const Text(
-                'WHAT IS THIS ABOUT?',
-                style: TextStyle(
-                  fontFamily: 'Google Sans',
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.black45,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
+
+              // ── Category chips ──
+              _sectionLabel('CATEGORY'),
+              const SizedBox(height: 10),
               SizedBox(
-                height: 40,
-                child: ListView.builder(
+                height: 54,
+                child: ListView.separated(
                   scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
                   itemCount: _categories.length,
-                  itemBuilder: (context, index) {
-                    bool selected = _category == _categories[index];
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) {
+                    final sel = _category == _categories[i];
                     return GestureDetector(
-                      onTap: () => setState(() => _category = _categories[index]),
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                      onTap: () => setState(() => _category = _categories[i]),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
-                          color: selected ? Colors.black : Colors.white,
+                          color: sel ? Colors.black : Colors.white,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: selected ? Colors.black : Colors.grey.shade300),
-                          boxShadow: selected ? [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 4))] : null,
+                          border: Border.all(
+                            color: sel ? Colors.black : Colors.grey.shade300,
+                          ),
                         ),
                         alignment: Alignment.center,
                         child: Text(
-                          _categories[index],
+                          _categories[i],
                           style: TextStyle(
                             fontFamily: 'Google Sans',
                             fontSize: 13,
-                            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                            color: selected ? Colors.white : Colors.black87,
+                            fontWeight: FontWeight.w600,
+                            color: sel ? Colors.white : Colors.black87,
                           ),
                         ),
                       ),
@@ -224,144 +312,268 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                   },
                 ),
               ),
-              
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
-              // Title Input
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
-                ),
-                child: TextField(
-                  controller: _titleController,
-                  decoration: InputDecoration(
-                    hintText: 'Give it a headline...',
-                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.all(18),
-                  ),
-                  style: const TextStyle(fontFamily: 'Google Sans', fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Description Input
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
-                ),
-                child: TextField(
-                  controller: _descController,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    hintText: 'Tell the circle more...',
-                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.all(18),
-                  ),
-                  style: const TextStyle(fontFamily: 'Google Sans', fontSize: 14, height: 1.5),
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // Media Section
-              const Text(
-                'ATTACH MEDIA',
-                style: TextStyle(
+              // ── Title ──
+              _sectionLabel('HEADLINE *'),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _titleController,
+                textCapitalization: TextCapitalization.sentences,
+                style: const TextStyle(
                   fontFamily: 'Google Sans',
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.black45,
-                  letterSpacing: 1.2,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Give your post a headline...',
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontWeight: FontWeight.normal,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Colors.black, width: 1.5),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
-              
-              if (_mediaFile != null)
+
+              // ── Description ──
+              _sectionLabel('CAPTION'),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _descController,
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                style: const TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 14,
+                  height: 1.5,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Tell your circle more about this...',
+                  hintStyle: TextStyle(color: Colors.grey.shade400),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Colors.black, width: 1.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Media section ──
+              _sectionLabel('MEDIA'),
+              const SizedBox(height: 10),
+
+              if (_rawFile == null) ...[
+                // Media pickers
+                Row(children: [
+                  Expanded(child: _mediaTile(
+                    icon: Icons.image_rounded,
+                    label: 'Photo',
+                    color: const Color(0xFFEEF4FF),
+                    iconColor: const Color(0xFF3B82F6),
+                    onTap: () => _pickMedia(false),
+                  )),
+                  const SizedBox(width: 12),
+                  Expanded(child: _mediaTile(
+                    icon: Icons.videocam_rounded,
+                    label: 'Video',
+                    color: const Color(0xFFF5F0FF),
+                    iconColor: const Color(0xFF8B5CF6),
+                    onTap: () => _pickMedia(true),
+                  )),
+                ]),
+              ] else ...[
+                // Media preview + controls
                 ClipRRect(
                   borderRadius: BorderRadius.circular(20),
                   child: Stack(
                     children: [
-                      AspectRatio(
-                        aspectRatio: _mediaType == 'image' ? 4/5 : 16/9,
-                        child: Container(
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: Colors.black12,
-                            image: _mediaType == 'image' 
-                              ? DecorationImage(image: FileImage(_mediaFile!), fit: BoxFit.cover)
-                              : null,
+                      // Preview
+                      if (_mediaType == 'image' && _displayFile != null)
+                        AspectRatio(
+                          aspectRatio: _aspectOptions[_selectedRatioIndex].ratio ?? 1.0,
+                          child: Image.file(
+                            _displayFile!,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
                           ),
-                          child: _mediaType == 'video' ? const Center(child: Icon(Icons.videocam, size: 64, color: Colors.black54)) : null,
+                        )
+                      else
+                        Container(
+                          height: 200,
+                          width: double.infinity,
+                          color: Colors.black12,
+                          child: const Center(
+                            child: Icon(Icons.videocam_rounded, size: 64, color: Colors.black38),
+                          ),
                         ),
-                      ),
+
+                      // Top-right close
                       Positioned(
-                        top: 12, right: 12,
+                        top: 10, right: 10,
                         child: GestureDetector(
-                          onTap: () => setState(() => _mediaFile = null),
+                          onTap: () => setState(() {
+                            _rawFile = _displayFile = null;
+                          }),
                           child: Container(
                             padding: const EdgeInsets.all(6),
-                            decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                            child: const Icon(Icons.close, color: Colors.white, size: 20),
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.close, color: Colors.white, size: 18),
+                          ),
+                        ),
+                      ),
+
+                      // Top-left media type badge
+                      Positioned(
+                        top: 10, left: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            _mediaType == 'image' ? '🖼 Image' : '🎬 Video',
+                            style: const TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 12,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
                     ],
                   ),
-                )
-              else
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildMediaPicker(
-                        onTap: () => _pickMedia(ImageSource.gallery, false),
-                        icon: Icons.image_outlined,
-                        label: 'Photo',
-                        color: Colors.blue.shade50,
-                        iconColor: Colors.blue.shade600,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildMediaPicker(
-                        onTap: () => _pickMedia(ImageSource.gallery, true),
-                        icon: Icons.videocam_outlined,
-                        label: 'Video',
-                        color: Colors.purple.shade50,
-                        iconColor: Colors.purple.shade600,
-                      ),
-                    ),
-                  ],
                 ),
 
-              const SizedBox(height: 32),
+                // Aspect ratio row (images only)
+                if (_mediaType == 'image') ...[
+                  const SizedBox(height: 12),
+                  _sectionLabel('CROP / ASPECT RATIO'),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: List.generate(_aspectOptions.length, (i) {
+                      final opt = _aspectOptions[i];
+                      final sel = _selectedRatioIndex == i;
+                      return Expanded(
+                        child: GestureDetector(
+                          onTap: () => _onRatioSelected(i),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: EdgeInsets.only(right: i < _aspectOptions.length - 1 ? 8 : 0),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              color: sel ? Colors.black : Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: sel ? Colors.black : Colors.grey.shade300,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  opt.icon,
+                                  size: 20,
+                                  color: sel ? Colors.white : Colors.grey.shade600,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  opt.label,
+                                  style: TextStyle(
+                                    fontFamily: 'Google Sans',
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: sel ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                                Text(
+                                  opt.sublabel,
+                                  style: TextStyle(
+                                    fontFamily: 'Google Sans',
+                                    fontSize: 10,
+                                    color: sel ? Colors.white70 : Colors.grey.shade500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              ],
 
-              // Post Button
+              const SizedBox(height: 24),
+
+              // ── Post button ──
               SizedBox(
                 width: double.infinity,
-                height: 56,
+                height: 54,
                 child: ElevatedButton(
                   onPressed: _isPosting ? null : _submitPost,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.black,
                     foregroundColor: Colors.white,
-                    elevation: 8,
-                    shadowColor: Colors.black.withValues(alpha: 0.4),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
-                  child: _isPosting 
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text(
-                        'Post to Circle',
-                        style: TextStyle(fontFamily: 'Google Sans', fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
+                  child: _isPosting
+                      ? const SizedBox(
+                          width: 22, height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2.5))
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            Icon(Icons.send_rounded, size: 20),
+                            SizedBox(width: 10),
+                            Text(
+                              'Post to Circle',
+                              style: TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
             ],
           ),
         ),
@@ -369,32 +581,53 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
     );
   }
 
-  Widget _buildMediaPicker({
-    required VoidCallback onTap,
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  Widget _sectionLabel(String text) => Text(
+    text,
+    style: TextStyle(
+      fontFamily: 'Google Sans',
+      fontSize: 11,
+      fontWeight: FontWeight.w800,
+      color: Colors.grey.shade500,
+      letterSpacing: 1.2,
+    ),
+  );
+
+  Widget _mediaTile({
     required IconData icon,
     required String label,
     required Color color,
     required Color iconColor,
+    required VoidCallback onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 20),
+        padding: const EdgeInsets.symmetric(vertical: 22),
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(18),
         ),
         child: Column(
           children: [
-            Icon(icon, size: 32, color: iconColor),
+            Icon(icon, size: 36, color: iconColor),
             const SizedBox(height: 8),
             Text(
               label,
               style: TextStyle(
                 fontFamily: 'Google Sans',
                 fontSize: 14,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
                 color: iconColor,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'from gallery',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 11,
+                color: iconColor.withValues(alpha: 0.6),
               ),
             ),
           ],

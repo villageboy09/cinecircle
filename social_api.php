@@ -169,10 +169,9 @@ try {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as &$r) $r['is_following'] = (bool)$r['is_following'];
 
-        echo json_encode(["status" => "success", "data" => $rows, "page" => $page]);
+        echo json_encode(["status" => "success", "data" => $rows, "page" => $page, "my_user_id" => $myId]);
     }
 
-    // ── get_following ──────────────────────────────────────
     elseif ($action === 'get_following') {
         $targetId = $_GET['target_user_id'] ?? $myId;
         $page  = max(1, (int)($_GET['page'] ?? 1));
@@ -192,7 +191,7 @@ try {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as &$r) $r['is_following'] = (bool)$r['is_following'];
 
-        echo json_encode(["status" => "success", "data" => $rows, "page" => $page]);
+        echo json_encode(["status" => "success", "data" => $rows, "page" => $page, "my_user_id" => $myId]);
     }
 
 // ════════════════════════════════════════════════════════
@@ -215,7 +214,6 @@ try {
         ")->execute([generateUUID(), $myId, $profileId]);
 
         // Notify profile owner — at most once per viewer per day
-        // Check if notification was already sent today
         $notifCheck = $pdo->prepare("
             SELECT id FROM notifications
             WHERE user_id = ? AND actor_id = ? AND type = 'profile_view'
@@ -344,9 +342,9 @@ try {
     // ── send_message ───────────────────────────────────────
     elseif ($action === 'send_message') {
         $recipientId = $_POST['recipient_id']    ?? '';
-        $body        = trim($_POST['body']        ?? '');
-        $mediaUrl    = $_POST['media_url']        ?? null;
-        $mediaType   = $_POST['media_type']       ?? null;
+        $body        = trim($_POST['body']       ?? '');
+        $mediaUrl    = $_POST['media_url']       ?? null;
+        $mediaType   = $_POST['media_type']      ?? null;
 
         if (!$recipientId || (!$body && !$mediaUrl)) {
             echo json_encode(["status" => "error", "message" => "Missing recipient_id or body"]);
@@ -404,7 +402,6 @@ try {
     }
 
     // ── start_conversation ─────────────────────────────────
-    // Lightweight: just ensure a conversation row exists, return its id
     elseif ($action === 'start_conversation') {
         $recipientId = $_POST['recipient_id'] ?? '';
         if (!$recipientId || $recipientId === $myId) {
@@ -536,28 +533,28 @@ try {
         $profile['followers']    = (int)$profile['followers'];
         $profile['following']    = (int)$profile['following'];
 
-        // Skills — graceful fallback if table doesn't exist
+        // Skills
         try {
             $sklStmt = $pdo->prepare("SELECT skill_name FROM user_skills WHERE user_id = ?");
             $sklStmt->execute([$targetId]);
             $profile['skills'] = $sklStmt->fetchAll(PDO::FETCH_COLUMN);
         } catch (PDOException $e) { $profile['skills'] = []; }
 
-        // Credits — graceful fallback if table doesn't exist
+        // Credits
         try {
             $crdStmt = $pdo->prepare("SELECT project_title, role, year FROM user_credits WHERE user_id = ? ORDER BY year DESC LIMIT 20");
             $crdStmt->execute([$targetId]);
             $profile['credits'] = $crdStmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) { $profile['credits'] = []; }
 
-        // Reels — graceful fallback if table doesn't exist
+        // Reels
         try {
             $rlStmt = $pdo->prepare("SELECT id, title, description, media_url, thumbnail_url FROM featured_reels WHERE user_id = ? LIMIT 10");
             $rlStmt->execute([$targetId]);
             $profile['reels'] = $rlStmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) { $profile['reels'] = []; }
 
-        // Record profile view — deduplicated per viewer+profile per calendar day
+        // Record profile view
         if ($myId !== $targetId) {
             try {
                 $viewCheck = $pdo->prepare("
@@ -574,7 +571,6 @@ try {
                     $pdo->prepare("INSERT INTO profile_views (id, viewer_id, profile_id, viewed_at) VALUES (?, ?, ?, NOW())")
                         ->execute([generateUUID(), $myId, $targetId]);
 
-                    // Notify owner once per day per viewer
                     $notifCheck = $pdo->prepare("
                         SELECT id FROM notifications
                         WHERE user_id = ? AND actor_id = ? AND type = 'profile_view' AND DATE(created_at) = CURDATE()
@@ -585,7 +581,7 @@ try {
                             ($me['full_name'] ?? 'Someone') . ' viewed your profile', '', 'profile', $myId);
                     }
                 }
-            } catch (PDOException $e) { /* profile_views not critical */ }
+            } catch (PDOException $e) { }
         }
 
         echo json_encode(["status" => "success", "data" => $profile]);
@@ -597,7 +593,6 @@ try {
         $description = $_POST['description'] ?? '';
         $mediaType   = $_POST['media_type']  ?? 'image';
         
-        // Sanitize user name for folder naming
         $userNameSanitized = preg_replace('/[^A-Za-z0-9_\-]/', '_', $me['full_name'] ?? 'User');
         $uploadSubDir = 'uploads/feed/' . $userNameSanitized . '/';
         $uploadFullPath = __DIR__ . '/' . $uploadSubDir;
@@ -651,7 +646,6 @@ try {
             exit();
         }
 
-        // Fetch post to verify ownership and get media URL
         $stmt = $pdo->prepare("SELECT user_id, media_url FROM feed_posts WHERE id = ?");
         $stmt->execute([$postId]);
         $post = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -666,11 +660,9 @@ try {
             exit();
         }
 
-        // Delete physical file if exists
         if ($post['media_url']) {
             $parsedUrl = parse_url($post['media_url']);
             $path = $parsedUrl['path'];
-            // Convert URL path to local physical path
             $scriptDir = dirname($_SERVER['PHP_SELF']);
             $relativePath = str_replace($scriptDir, '', $path);
             $localPath = __DIR__ . $relativePath;
@@ -680,15 +672,189 @@ try {
             }
         }
 
-        // Delete from DB
         $pdo->prepare("DELETE FROM feed_posts WHERE id = ?")->execute([$postId]);
-        // Also delete likes and comments related to this post
         $pdo->prepare("DELETE FROM feed_likes WHERE post_id = ?")->execute([$postId]);
         $pdo->prepare("DELETE FROM feed_comments WHERE post_id = ?")->execute([$postId]);
 
         echo json_encode(["status" => "success", "message" => "Post deleted"]);
     }
 
+    // --- SOCIAL CREDITS SYSTEM ---
+    elseif ($action === 'get_social_credits') {
+        $stmt = $pdo->prepare("SELECT balance FROM social_credits WHERE user_id = ?");
+        $stmt->execute([$myId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        echo json_encode(["status" => "success", "balance" => $row ? (int)$row['balance'] : 0]);
+    }
+
+    elseif ($action === 'get_credits') {
+        $stmt = $pdo->prepare("SELECT current_balance, total_earned FROM social_credits WHERE user_id = ?");
+        $stmt->execute([$myId]);
+        $credits = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$credits) {
+            $credits = ["current_balance" => 0, "total_earned" => 0];
+        }
+
+        $totalSpent = (int)$credits['total_earned'] - (int)$credits['current_balance'];
+
+        $stmt = $pdo->prepare("SELECT transaction_type, activity_type, amount, description, created_at FROM credit_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20");
+        $stmt->execute([$myId]);
+        $rawHistory = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $history = [];
+        foreach ($rawHistory as $h) {
+            $history[] = [
+                'type' => strtolower($h['transaction_type']),
+                'source' => strtolower($h['activity_type']),
+                'amount' => abs($h['amount']), 
+                'title' => $h['description'],
+                'created_at' => $h['created_at']
+            ];
+        }
+
+        echo json_encode([
+            "status" => "success",
+            "data" => [
+                "balance" => (int)$credits['current_balance'],
+                "total_earned" => (int)$credits['total_earned'],
+                "total_spent" => $totalSpent,
+                "history" => $history
+            ]
+        ]);
+    }
+
+    elseif ($action === 'award_social_credits') {
+        $amount = (int)($_POST['amount'] ?? 10);
+        $activity = strtoupper($_POST['activity'] ?? 'GENERAL');
+        $description = $_POST['description'] ?? '';
+
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare("SELECT user_id, current_balance, total_earned FROM social_credits WHERE user_id = ? FOR UPDATE");
+            $stmt->execute([$myId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($row) {
+                $newBalance = $row['current_balance'] + $amount;
+                $newEarned = $row['total_earned'] + $amount;
+                $update = $pdo->prepare("UPDATE social_credits SET current_balance = ?, total_earned = ? WHERE user_id = ?");
+                $update->execute([$newBalance, $newEarned, $myId]);
+            } else {
+                $newBalance = $amount;
+                $insert = $pdo->prepare("INSERT INTO social_credits (user_id, mobile_number, current_balance, total_earned) VALUES (?, ?, ?, ?)");
+                $insert->execute([$myId, $mobile, $amount, $amount]);
+            }
+
+            $log = $pdo->prepare("INSERT INTO credit_transactions (user_id, amount, transaction_type, activity_type, description) VALUES (?, ?, 'EARN', ?, ?)");
+            $log->execute([$myId, $amount, $activity, $description]);
+
+            $pdo->commit();
+            echo json_encode(["status" => "success", "new_balance" => $newBalance]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+        }
+    }
+
+    elseif ($action === 'get_reward_categories') {
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT reward_type AS category
+            FROM reward_catalog
+            WHERE is_active = 1
+            ORDER BY FIELD(reward_type, 'TICKET', 'MERCH', 'BADGE', 'PREMIUM')
+        ");
+        $stmt->execute();
+        $categories = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $balStmt = $pdo->prepare("SELECT current_balance FROM social_credits WHERE user_id = ?");
+        $balStmt->execute([$myId]);
+        $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            "status"     => "success",
+            "categories" => $categories,
+            "balance"    => $balRow ? (int)$balRow['current_balance'] : 0
+        ]);
+    }
+
+    elseif ($action === 'get_reward_items') {
+        $rewardType = strtoupper(trim($_GET['tab'] ?? 'MERCH'));
+        $allowed = ['TICKET', 'MERCH', 'BADGE', 'PREMIUM'];
+        if (!in_array($rewardType, $allowed)) $rewardType = 'MERCH';
+
+        $stmt = $pdo->prepare("
+            SELECT id, reward_name AS title, description,
+                   cost_credits AS credits_cost, reward_type AS category,
+                   stock_quantity, image_url, icon_name,
+                   CASE WHEN stock_quantity IS NULL THEN NULL
+                        WHEN stock_quantity = 0 THEN 'Out of stock'
+                        WHEN stock_quantity <= 5 THEN CONCAT('Only ', stock_quantity, ' left')
+                        ELSE NULL END AS stock_label
+            FROM reward_catalog
+            WHERE reward_type = ? AND is_active = 1
+            ORDER BY cost_credits ASC
+        ");
+        $stmt->execute([$rewardType]);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($items as &$item) {
+            $item['credits_cost'] = (int)$item['credits_cost'];
+            if ($item['stock_quantity'] !== null) {
+                $item['stock_quantity'] = (int)$item['stock_quantity'];
+            }
+        }
+
+        $balStmt = $pdo->prepare("SELECT current_balance FROM social_credits WHERE user_id = ?");
+        $balStmt->execute([$myId]);
+        $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            "status"  => "success",
+            "data"    => $items,
+            "balance" => $balRow ? (int)$balRow['current_balance'] : 0
+        ]);
+    }
+
+    elseif ($action === 'redeem_item') {
+        $itemId = $_POST['item_id'] ?? '';
+        
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare("SELECT * FROM reward_catalog WHERE id = ? FOR UPDATE");
+            $stmt->execute([$itemId]);
+            $item = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$item) throw new Exception("Item not found");
+
+            $balStmt = $pdo->prepare("SELECT user_id, current_balance FROM social_credits WHERE user_id = ? FOR UPDATE");
+            $balStmt->execute([$myId]);
+            $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$balRow || $balRow['current_balance'] < $item['cost_credits']) {
+                echo json_encode(["status" => "insufficient_credits", "balance" => $balRow ? $balRow['current_balance'] : 0, "required" => $item['cost_credits']]);
+                $pdo->rollBack();
+                exit();
+            }
+
+            $newBalance = $balRow['current_balance'] - $item['cost_credits'];
+            $pdo->prepare("UPDATE social_credits SET current_balance = ? WHERE user_id = ?")
+                ->execute([$newBalance, $myId]);
+
+            $pdo->prepare("INSERT INTO credit_transactions (user_id, amount, transaction_type, activity_type, description) VALUES (?, ?, 'SPEND', 'REDEMPTION', ?)")
+                ->execute([$myId, -$item['cost_credits'], "Redeemed " . $item['reward_name']]);
+
+            $pdo->prepare("INSERT INTO redemptions (user_id, reward_id, status) VALUES (?, ?, 'PENDING')")
+                ->execute([$myId, $itemId]);
+
+            $pdo->commit();
+            echo json_encode(["status" => "success", "new_balance" => $newBalance]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+        }
+    }
+
+    // THE 'ELSE' BLOCK MUST BE THE VERY LAST CONDITIONAL IN THE CHAIN
     else {
         http_response_code(400);
         echo json_encode(["status" => "error", "message" => "Invalid action: $action"]);

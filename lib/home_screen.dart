@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:math' as math;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,7 +7,6 @@ import 'jobs_screen.dart';
 import 'profile_screen.dart';
 import 'messages_screen.dart';
 import 'trivia_screen.dart';
-import 'rentals_screen.dart';
 import 'activity_screen.dart';
 import 'follow_card.dart';
 import 'create_post_sheet.dart';
@@ -148,6 +146,82 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _toggleSave(int index) async {
+    final post = _posts[index];
+    final postId = post['id'];
+    final isSaved =
+        post['is_saved'] == 1 ||
+        post['is_saved'] == true ||
+        post['is_saved'] == '1';
+
+    // Optimistic UI update
+    setState(() {
+      _posts[index]['is_saved'] = !isSaved;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mobile = prefs.getString('user_phone') ?? '';
+      final response = await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'save_post',
+          'mobile_number': mobile,
+          'post_id': postId.toString(),
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          final savedState = data['is_saved'] as bool;
+          setState(() => _posts[index]['is_saved'] = savedState);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  savedState ? 'Post saved to bookmarks' : 'Post removed from bookmarks',
+                  style: const TextStyle(fontFamily: 'Google Sans'),
+                ),
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 2),
+                backgroundColor: Colors.black87,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            );
+          }
+        } else {
+          // Revert on failure
+          setState(() => _posts[index]['is_saved'] = isSaved);
+        }
+      } else {
+        setState(() => _posts[index]['is_saved'] = isSaved);
+      }
+    } catch (e) {
+      debugPrint('Save error $e');
+      setState(() => _posts[index]['is_saved'] = isSaved);
+    }
+  }
+
+  Future<void> _recordView(String postId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mobile = prefs.getString('user_phone') ?? '';
+      if (mobile.isEmpty) return;
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'view_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+    } catch (e) {
+      debugPrint('View record error: $e');
+    }
+  }
+
   void _showCommentsBottomSheet(String postId, int postIndex) {
     showModalBottomSheet(
       context: context,
@@ -186,7 +260,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showPostOptions(Map<String, dynamic> post) {
     final bool isOwner = post['user_id']?.toString() == _currentUserId;
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -195,13 +269,25 @@ class _HomeScreenState extends State<HomeScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(28),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 20)],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 20,
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 12),
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
             const SizedBox(height: 20),
             if (isOwner)
               _buildOptionItem(
@@ -230,14 +316,30 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildOptionItem({required String label, required IconData icon, Color? color, required VoidCallback onTap}) {
+  Widget _buildOptionItem({
+    required String label,
+    required IconData icon,
+    Color? color,
+    required VoidCallback onTap,
+  }) {
     return ListTile(
       leading: Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: (color ?? Colors.grey.shade800).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(
+          color: (color ?? Colors.grey.shade800).withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Icon(icon, color: color ?? Colors.grey.shade800, size: 22),
       ),
-      title: Text(label, style: TextStyle(fontFamily: 'Google Sans', fontWeight: FontWeight.w600, fontSize: 16, color: color ?? Colors.grey.shade800)),
+      title: Text(
+        label,
+        style: TextStyle(
+          fontFamily: 'Google Sans',
+          fontWeight: FontWeight.w600,
+          fontSize: 16,
+          color: color ?? Colors.grey.shade800,
+        ),
+      ),
       onTap: onTap,
     );
   }
@@ -252,26 +354,46 @@ class _HomeScreenState extends State<HomeScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(32),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 30)],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 30,
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.red.shade50, shape: BoxShape.circle),
-              child: Icon(Icons.delete_sweep_rounded, color: Colors.red.shade600, size: 32),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.delete_sweep_rounded,
+                color: Colors.red.shade600,
+                size: 32,
+              ),
             ),
             const SizedBox(height: 20),
             const Text(
               'Delete this post?',
-              style: TextStyle(fontFamily: 'Google Sans', fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 12),
             Text(
               'This action is permanent and cannot be undone. Are you sure you want to remove this from your circle?',
               textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'Google Sans', color: Colors.grey.shade600, height: 1.5),
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                color: Colors.grey.shade600,
+                height: 1.5,
+              ),
             ),
             const SizedBox(height: 32),
             Row(
@@ -281,9 +403,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: () => Navigator.pop(context),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
-                    child: Text('Cancel', style: TextStyle(fontFamily: 'Google Sans', color: Colors.grey.shade800, fontWeight: FontWeight.bold)),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade800,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -298,9 +429,17 @@ class _HomeScreenState extends State<HomeScreen> {
                       foregroundColor: Colors.white,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
-                    child: const Text('Delete', style: TextStyle(fontFamily: 'Google Sans', fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Delete',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -332,9 +471,9 @@ class _HomeScreenState extends State<HomeScreen> {
             _posts.removeWhere((p) => p['id']?.toString() == postId);
           });
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Post deleted')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Post deleted')));
           }
         }
       }
@@ -496,36 +635,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Spacer(),
                       IconButton(
                         icon: const Icon(
-                          Icons.explore_outlined,
-                          color: Colors.black,
-                          size: 26,
-                        ),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const DiscoverScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.chat_bubble_outline,
-                          color: Colors.black,
-                          size: 26,
-                        ),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const MessagesScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(
                           Icons.notifications_none,
                           color: Colors.black,
                           size: 26,
@@ -538,6 +647,37 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           );
                         },
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _selectedIndex =
+                                5; // Index for Profile (Matches ProfileScreen position in IndexedStack)
+                          });
+                        },
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.grey.shade300,
+                              width: 1,
+                            ),
+                            image:
+                                _userProfileImage != null &&
+                                    _userProfileImage!.isNotEmpty
+                                ? DecorationImage(
+                                    image: NetworkImage(_userProfileImage!),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
+                          ),
+                          child: _userProfileImage == null
+                              ? const Icon(Icons.person, size: 20)
+                              : null,
+                        ),
                       ),
                     ],
                   ),
@@ -553,8 +693,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             controller: _scrollController,
                             padding: EdgeInsets.zero,
                             itemCount: combinedFeed.length,
-                            separatorBuilder: (context, index) =>
-                                Divider(height: 1, thickness: 0.5, color: Colors.grey.shade200),
+                            separatorBuilder: (context, index) => Divider(
+                              height: 1,
+                              thickness: 0.5,
+                              color: Colors.grey.shade200,
+                            ),
                             itemBuilder: (context, index) =>
                                 combinedFeed[index],
                           ),
@@ -565,16 +708,20 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           // Trivia Tab (Index 1)
           const TriviaScreen(),
-          // Jobs Tab (Index 2)
+          // Discover Tab (Index 2)
+          const DiscoverScreen(),
+          // Jobs Tab (Index 3)
           const JobsScreen(),
-          // Rentals Tab (Index 3)
-          const RentalsScreen(),
-          // Profile Tab (Index 4)
+          // Messages (Chat) Tab (Index 4)
+          const MessagesScreen(),
+          // Profile Tab (Index 5)
           const ProfileScreen(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
+        currentIndex: _selectedIndex > 4
+            ? 0
+            : _selectedIndex, // Reset if Profile is selected via AppBar
         onTap: (index) {
           setState(() {
             _selectedIndex = index;
@@ -595,82 +742,50 @@ class _HomeScreenState extends State<HomeScreen> {
           fontSize: 11,
           fontWeight: FontWeight.w500,
         ),
-        items: [
-          const BottomNavigationBarItem(
+        items: const [
+          BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
             activeIcon: Icon(Icons.home),
             label: 'Home',
           ),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
             icon: Icon(Icons.emoji_events_outlined),
             activeIcon: Icon(Icons.emoji_events),
             label: 'Trivia',
           ),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
+            icon: Icon(Icons.explore_outlined),
+            activeIcon: Icon(Icons.explore),
+            label: 'Discover',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.work_outline),
             activeIcon: Icon(Icons.work),
             label: 'Jobs',
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.business_center_outlined),
-            activeIcon: Icon(Icons.business_center),
-            label: 'Rentals',
-          ),
           BottomNavigationBarItem(
-            icon: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.grey.shade300, width: 1),
-                image:
-                    _userProfileImage != null && _userProfileImage!.isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(_userProfileImage!),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-              child: _userProfileImage == null
-                  ? const Icon(Icons.person, size: 16)
-                  : null,
-            ),
-            activeIcon: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.black, width: 1.5),
-                image:
-                    _userProfileImage != null && _userProfileImage!.isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(_userProfileImage!),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-              child: _userProfileImage == null
-                  ? const Icon(Icons.person, size: 16)
-                  : null,
-            ),
-            label: 'Profile',
+            icon: Icon(Icons.chat_bubble_outline),
+            activeIcon: Icon(Icons.chat_bubble),
+            label: 'Chat',
           ),
         ],
       ),
-      floatingActionButton: AnimatedSlide(
-        duration: const Duration(milliseconds: 300),
-        offset: _showFab ? Offset.zero : const Offset(0, 3.5),
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 300),
-          opacity: _showFab ? 1 : 0,
-          child: FloatingActionButton(
-            onPressed: () => _openCreatePostSheet(),
-            backgroundColor: Colors.black,
-            shape: const CircleBorder(),
-            child: const Icon(Icons.add, color: Colors.white, size: 30),
-          ),
-        ),
-      ),
+      floatingActionButton: _selectedIndex == 0 
+          ? AnimatedSlide(
+              duration: const Duration(milliseconds: 300),
+              offset: _showFab ? Offset.zero : const Offset(0, 3.5),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 300),
+                opacity: _showFab ? 1 : 0,
+                child: FloatingActionButton(
+                  onPressed: () => _openCreatePostSheet(),
+                  backgroundColor: Colors.black,
+                  shape: const CircleBorder(),
+                  child: const Icon(Icons.add, color: Colors.white, size: 30),
+                ),
+              ),
+            )
+          : null,
     );
   }
 
@@ -687,9 +802,19 @@ class _HomeScreenState extends State<HomeScreen> {
         post['is_liked'] == 1 ||
         post['is_liked'] == true ||
         post['is_liked'] == '1';
+    final bool isSaved =
+        post['is_saved'] == 1 ||
+        post['is_saved'] == true ||
+        post['is_saved'] == '1';
     final String likesCount = (post['likes_count'] ?? '0').toString();
     final String commentsCount = (post['comments_count'] ?? '0').toString();
+    final String viewsCount = (post['views_count'] ?? '0').toString();
     final bool isVideo = post['media_type'] == 'video';
+
+    // Record view fire-and-forget (only once per postId per session)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (postId.isNotEmpty) _recordView(postId);
+    });
 
     return Container(
       key: key,
@@ -816,10 +941,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     )
                   : post['media_url'] != null && post['media_type'] == 'video'
-                    ? FeedVideoPlayer(
-                        videoUrl: post['media_url'],
-                      )
-                    : SizedBox(
+                  ? FeedVideoPlayer(videoUrl: post['media_url'])
+                  : SizedBox(
                       height: 220, // Final fallback logic
                       child: Stack(
                         alignment: Alignment.center,
@@ -901,21 +1024,35 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(width: 24),
-                Transform(
-                  alignment: Alignment.center,
-                  transform: Matrix4.rotationY(math.pi),
-                  child: const Icon(
-                    Icons.reply,
-                    size: 26,
-                    color: Colors.black87,
-                  ),
+                const SizedBox(width: 20),
+                // Views count
+                Row(
+                  children: [
+                    Icon(
+                      Icons.visibility_outlined,
+                      size: 22,
+                      color: Colors.grey.shade600,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      viewsCount,
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
                 ),
                 const Spacer(),
-                const Icon(
-                  Icons.bookmark_border,
-                  size: 26,
-                  color: Colors.black87,
+                // Bookmark / Save button
+                GestureDetector(
+                  onTap: () => _toggleSave(index),
+                  child: Icon(
+                    isSaved ? Icons.bookmark : Icons.bookmark_border,
+                    size: 26,
+                    color: isSaved ? Colors.black : Colors.black87,
+                  ),
                 ),
               ],
             ),
@@ -967,7 +1104,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   Shimmer.fromColors(
                     baseColor: Colors.grey.shade200,
                     highlightColor: Colors.white,
-                    child: Container(width: 40, height: 40, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Column(
@@ -976,13 +1120,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       Shimmer.fromColors(
                         baseColor: Colors.grey.shade200,
                         highlightColor: Colors.white,
-                        child: Container(width: 120, height: 14, color: Colors.white),
+                        child: Container(
+                          width: 120,
+                          height: 14,
+                          color: Colors.white,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Shimmer.fromColors(
                         baseColor: Colors.grey.shade200,
                         highlightColor: Colors.white,
-                        child: Container(width: 80, height: 10, color: Colors.white),
+                        child: Container(
+                          width: 80,
+                          height: 10,
+                          color: Colors.white,
+                        ),
                       ),
                     ],
                   ),
@@ -993,7 +1145,11 @@ class _HomeScreenState extends State<HomeScreen> {
             Shimmer.fromColors(
               baseColor: Colors.grey.shade200,
               highlightColor: Colors.white,
-              child: Container(width: double.infinity, height: 400, color: Colors.white),
+              child: Container(
+                width: double.infinity,
+                height: 400,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(height: 16),
             Padding(

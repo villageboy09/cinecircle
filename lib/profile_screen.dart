@@ -9,6 +9,8 @@ import 'package:video_player/video_player.dart';
 import 'video_player_screen.dart';
 import 'edit_profile_screen.dart';
 import 'welcome_screen.dart';
+import 'social_cine_credits_screen.dart';
+import 'followers_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -28,6 +30,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _userPhone = '';
   int _followersCount = 0;
   int _followingCount = 0;
+  int _socialBalance = 0;
 
   @override
   void initState() {
@@ -69,6 +72,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             });
             // Fetch follow counts after profile data is available (needs id)
             _loadFollowCounts(mobile);
+            _loadSocialCredits(mobile);
           }
           return;
         }
@@ -87,11 +91,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     // Fetch follow counts from social API
     _loadFollowCounts(mobile);
+    _loadSocialCredits(mobile);
+  }
+
+  Future<void> _loadSocialCredits(String mobile) async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/social_api.php?action=get_credits&mobile_number=$mobile',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == 'success' && mounted) {
+          setState(() {
+            _socialBalance =
+                int.tryParse(
+                  data['data']?['balance']?.toString() ?? '0',
+                ) ??
+                0;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadFollowCounts(String mobile) async {
     try {
-      // We need our own userId — get it from profile data
+      // We need our own userId ÔÇö get it from profile data
       final myId = _profileData?['id'];
       if (myId == null) return;
       final res = await http.get(
@@ -308,30 +335,71 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildStat(
-                      '${_creditsList.length}',
-                      'Credits',
-                      Icons.video_library_outlined,
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const SocialCineCreditsScreen(),
+                          ),
+                        );
+                      },
+                      child: _buildStat(
+                        '$_socialBalance',
+                        'Social Credits',
+                        Icons.stars_rounded,
+                        color: Colors.amber.shade700,
+                      ),
                     ),
                     Container(
                       height: 40,
                       width: 1,
                       color: Colors.grey.shade300,
                     ),
-                    _buildStat(
-                      '$_followersCount',
-                      'Followers',
-                      Icons.people_outline,
+                    GestureDetector(
+                      onTap: () {
+                        if (_profileData?['id'] == null) return;
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => FollowersScreen(
+                              targetUserId: _profileData!['id'].toString(),
+                              displayName: _userName,
+                              initialTab: 0,
+                            ),
+                          ),
+                        ).then((_) => _loadFollowCounts(_userPhone));
+                      },
+                      child: _buildStat(
+                        '$_followersCount',
+                        'Followers',
+                        Icons.people_outline,
+                      ),
                     ),
                     Container(
                       height: 40,
                       width: 1,
                       color: Colors.grey.shade300,
                     ),
-                    _buildStat(
-                      '$_followingCount',
-                      'Following',
-                      Icons.person_outline,
+                    GestureDetector(
+                      onTap: () {
+                        if (_profileData?['id'] == null) return;
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => FollowersScreen(
+                              targetUserId: _profileData!['id'].toString(),
+                              displayName: _userName,
+                              initialTab: 1,
+                            ),
+                          ),
+                        ).then((_) => _loadFollowCounts(_userPhone));
+                      },
+                      child: _buildStat(
+                        '$_followingCount',
+                        'Following',
+                        Icons.person_outline,
+                      ),
                     ),
                   ],
                 ),
@@ -930,12 +998,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildStat(String count, String label, IconData icon) {
+  Widget _buildStat(String count, String label, IconData icon, {Color? color}) {
     return Column(
       children: [
         Row(
           children: [
-            Icon(icon, size: 20, color: Colors.black87),
+            Icon(icon, size: 20, color: color ?? Colors.black87),
             const SizedBox(width: 6),
             Text(
               count,
