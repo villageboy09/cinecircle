@@ -32,6 +32,19 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isSending = false;
   final TextEditingController _msgCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
+  Map<String, dynamic>? _replyToMessage;
+  static const List<String> _reactionEmojis = [
+    '👍',
+    '❤️',
+    '😂',
+    '😮',
+    '😢',
+    '🙏',
+    '🔥',
+    '👏',
+    '🎉',
+    '💯',
+  ];
 
   @override
   void initState() {
@@ -89,6 +102,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _msgCtrl.text.trim();
     if (text.isEmpty || _isSending) return;
 
+    final replyTarget = _replyToMessage;
+    setState(() => _replyToMessage = null);
+
     _msgCtrl.clear();
     setState(() {
       _isSending = true;
@@ -99,6 +115,10 @@ class _ChatScreenState extends State<ChatScreen> {
         'sent_at': DateTime.now().toIso8601String(),
         'time_ago': 'Just now',
         'is_read': false,
+        'reply_to_message_id': replyTarget?['id'],
+        'reply_to_body': replyTarget?['body'],
+        'reply_to_sender_name': replyTarget?['sender_name'],
+        'reactions': <dynamic>[],
       });
     });
     _scrollToBottom();
@@ -112,12 +132,41 @@ class _ChatScreenState extends State<ChatScreen> {
           'mobile_number': mobile,
           'recipient_id': widget.recipientId,
           'body': text,
+          if (replyTarget?['id'] != null)
+            'reply_to_message_id': replyTarget!['id'].toString(),
         },
       );
     } catch (e) {
       debugPrint('sendMessage error: $e');
     }
     setState(() => _isSending = false);
+  }
+
+  Future<void> _reactToMessage(Map<String, dynamic> msg, String emoji) async {
+    final messageId = msg['id']?.toString() ?? '';
+    if (messageId.isEmpty) return;
+    try {
+      final mobile = await _getMobile();
+      final res = await http.post(
+        Uri.parse(_socialApiChat),
+        body: {
+          'action': 'react_message',
+          'mobile_number': mobile,
+          'message_id': messageId,
+          'emoji': emoji,
+        },
+      );
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['status'] == 'success') {
+          setState(() {
+            msg['reactions'] = data['data'] ?? [];
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('reactMessage error: $e');
+    }
   }
 
   @override
@@ -208,6 +257,50 @@ class _ChatScreenState extends State<ChatScreen> {
                     itemBuilder: (_, i) => _buildBubble(_messages[i]),
                   ),
           ),
+          if (_replyToMessage != null)
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _replyToMessage?['sender_name'] ?? 'Replying',
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          (_replyToMessage?['body'] ?? '').toString(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => setState(() => _replyToMessage = null),
+                  ),
+                ],
+              ),
+            ),
           // Input bar
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -270,6 +363,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildBubble(Map<String, dynamic> msg) {
     final bool isMe = msg['is_me'] == true;
+    final List reactions = msg['reactions'] ?? [];
+    final String replyBody = (msg['reply_to_body'] ?? '').toString();
+    final String replySender = (msg['reply_to_sender_name'] ?? '').toString();
     return GestureDetector(
       onLongPress: () => _showMessageActions(msg),
       child: Container(
@@ -294,16 +390,89 @@ class _ChatScreenState extends State<ChatScreen> {
                   bottomRight: Radius.circular(isMe ? 4 : 20),
                 ),
               ),
-              child: Text(
-                msg['body'] ?? '',
-                style: TextStyle(
-                  fontFamily: 'Google Sans',
-                  fontSize: 15,
-                  color: isMe ? Colors.white : Colors.black87,
-                  height: 1.4,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (replyBody.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isMe
+                            ? Colors.white.withValues(alpha: 0.12)
+                            : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            replySender.isNotEmpty ? replySender : 'Reply',
+                            style: TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: isMe ? Colors.white70 : Colors.black54,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            replyBody,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 12,
+                              color: isMe ? Colors.white70 : Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Text(
+                    msg['body'] ?? '',
+                    style: TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 15,
+                      color: isMe ? Colors.white : Colors.black87,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ),
             ),
+            if (reactions.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Wrap(
+                  spacing: 6,
+                  children: reactions.map<Widget>((r) {
+                    final emoji = r['emoji']?.toString() ?? '';
+                    final count = r['count']?.toString() ?? '0';
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$emoji $count',
+                        style: const TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
             const SizedBox(height: 4),
             Text(
               msg['time_ago'] ?? '',
@@ -335,36 +504,40 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: _reactionEmojis
+                  .map(
+                    (emoji) => InkWell(
+                      onTap: () {
+                        Navigator.pop(context);
+                        _reactToMessage(msg, emoji);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Text(
+                          emoji,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.reply, color: Colors.black),
               title: const Text('Reply'),
               onTap: () {
                 Navigator.pop(context);
-                _msgCtrl.text = '> $body\n';
-                _msgCtrl.selection = TextSelection.fromPosition(
-                  TextPosition(offset: _msgCtrl.text.length),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.emoji_emotions_outlined,
-                color: Colors.black,
-              ),
-              title: const Text('React with 👍'),
-              onTap: () {
-                Navigator.pop(context);
-                _msgCtrl.text = '👍';
-                _sendMessage();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.favorite_border, color: Colors.black),
-              title: const Text('React with ❤️'),
-              onTap: () {
-                Navigator.pop(context);
-                _msgCtrl.text = '❤️';
-                _sendMessage();
+                setState(() => _replyToMessage = msg);
               },
             ),
             ListTile(

@@ -295,6 +295,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               label: 'Bio',
               controller: _bioController,
               maxLines: 4,
+              maxLength: 250,
             ),
             const SizedBox(height: 32),
             SizedBox(
@@ -339,6 +340,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required String label,
     required TextEditingController controller,
     int maxLines = 1,
+    int? maxLength,
   }) {
     final List<TextInputFormatter>? formatters = label == 'Full Name'
         ? [FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z .'-]"))]
@@ -349,6 +351,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return TextField(
       controller: controller,
       maxLines: maxLines,
+      maxLength: maxLength,
       inputFormatters: formatters,
       style: const TextStyle(
         fontFamily: 'Google Sans',

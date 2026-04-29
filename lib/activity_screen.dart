@@ -34,11 +34,19 @@ class _ActivityScreenState extends State<ActivityScreen> {
   List<dynamic> _notifications = [];
   int _unreadCount = 0;
   int _filterIndex = 0;
+  String? _userProfileImage;
 
   @override
   void initState() {
     super.initState();
     _fetchNotifications();
+    _loadUserProfile();
+  }
+
+  Future<void> _loadUserProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _userProfileImage = prefs.getString('user_image'));
   }
 
   Future<String> _getMobile() async {
@@ -124,6 +132,27 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 ),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.grey.shade300, width: 1),
+                image:
+                    _userProfileImage != null && _userProfileImage!.isNotEmpty
+                    ? DecorationImage(
+                        image: NetworkImage(_userProfileImage!),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
+              ),
+              child: _userProfileImage == null
+                  ? const Icon(Icons.person, size: 18)
+                  : null,
+            ),
+          ),
         ],
       ),
       body: SafeArea(

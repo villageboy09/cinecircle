@@ -30,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<dynamic> _nearby = [];
   String? _currentUserId;
   String? _userProfileImage;
+  Map<String, double> _aspectRatios = {};
 
   // FAB Scroll Logic
   late ScrollController _scrollController;
@@ -43,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _scrollController.addListener(_scrollListener);
     _fetchHomeFeed();
     _loadUserProfile();
+    _loadAspectRatios();
   }
 
   @override
@@ -101,6 +103,19 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint('Error $e');
     }
     setState(() => _isLoading = false);
+  }
+
+  Future<void> _loadAspectRatios() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('post_aspect_ratios') ?? '{}';
+      final Map<String, dynamic> map = json.decode(raw);
+      setState(() {
+        _aspectRatios = map.map(
+          (key, value) => MapEntry(key, (value as num).toDouble()),
+        );
+      });
+    } catch (_) {}
   }
 
   String _formatTimeAgo(String? timestamp) {
@@ -321,11 +336,49 @@ class _HomeScreenState extends State<HomeScreen> {
                 _sharePost(post);
               },
             ),
+            if (!isOwner)
+              _buildOptionItem(
+                label: 'Report Post',
+                icon: Icons.flag_outlined,
+                color: Colors.red,
+                onTap: () {
+                  Navigator.pop(context);
+                  _reportPost(post['id']?.toString() ?? '');
+                },
+              ),
             const SizedBox(height: 20),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _reportPost(String postId) async {
+    if (postId.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mobile = prefs.getString('user_phone') ?? '';
+      if (mobile.isEmpty) return;
+      final response = await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'report_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+      if (!mounted) return;
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Report submitted')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to report this post.')),
+        );
+      }
+    } catch (_) {}
   }
 
   bool _canEditPost(dynamic createdAt) {
@@ -340,13 +393,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _sharePost(Map<String, dynamic> post) {
     final title = (post['title'] ?? '').toString().trim();
-    final description = (post['description'] ?? '').toString().trim();
-    final postId = post['id']?.toString() ?? '';
-    final shareText = [
-      if (title.isNotEmpty) title,
-      if (description.isNotEmpty) description,
-      if (postId.isNotEmpty) 'Post ID: $postId',
-    ].join('\n\n');
+    final url = (post['share_url'] ?? post['media_url'] ?? '').toString();
+    final shareText = url.isNotEmpty && title.isNotEmpty
+        ? '$title: $url'
+        : [title, url].where((v) => v.isNotEmpty).join('\n');
 
     Clipboard.setData(ClipboardData(text: shareText));
     if (!mounted) return;
@@ -696,6 +746,129 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showViewsBottomSheet(String postId) {
+    if (postId.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Viewers',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<dynamic>>(
+              future: _fetchViewers(postId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: CircularProgressIndicator(color: Colors.black),
+                  );
+                }
+                final viewers = snapshot.data ?? [];
+                if (viewers.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No viewers yet.',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                  child: ListView.separated(
+                    itemCount: viewers.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final viewer = viewers[index];
+                      final name = viewer['full_name'] ?? 'User';
+                      final imageUrl = viewer['profile_image_url'] ?? '';
+                      final city = viewer['city'] ?? '';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.grey.shade200,
+                          backgroundImage: imageUrl.isNotEmpty
+                              ? NetworkImage(imageUrl)
+                              : null,
+                          child: imageUrl.isEmpty
+                              ? Icon(Icons.person, color: Colors.grey.shade500)
+                              : null,
+                        ),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: city.toString().isNotEmpty
+                            ? Text(
+                                city,
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<List<dynamic>> _fetchViewers(String postId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mobile = prefs.getString('user_phone') ?? '';
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_post_viewers&mobile_number=$mobile&post_id=$postId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          return List<dynamic>.from(data['data'] ?? []);
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<Widget> feedItems = _posts.asMap().entries.map((entry) {
@@ -1011,6 +1184,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final String title = post['title'] ?? '';
     final String description = post['description'] ?? '';
     final String timeAgo = _formatTimeAgo(post['created_at']);
+    final double? storedRatio = _aspectRatios[postId];
 
     final bool isLiked =
         post['is_liked'] == 1 ||
@@ -1152,7 +1326,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: Colors.grey.shade100,
                 child: post['media_type'] == 'image'
                     ? AspectRatio(
-                        aspectRatio: 4 / 5,
+                        aspectRatio: storedRatio ?? 4 / 5,
                         child: Image.network(
                           post['media_url'],
                           fit: BoxFit.cover,
@@ -1214,23 +1388,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(width: 20),
                 // Views count
-                Row(
-                  children: [
-                    Icon(
-                      Icons.visibility_outlined,
-                      size: 22,
-                      color: Colors.grey.shade600,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      viewsCount,
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade700,
+                GestureDetector(
+                  onTap: () => _showViewsBottomSheet(postId),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.visibility_outlined,
+                        size: 22,
+                        color: Colors.grey.shade600,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 5),
+                      Text(
+                        viewsCount,
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const Spacer(),
                 // Bookmark / Save button

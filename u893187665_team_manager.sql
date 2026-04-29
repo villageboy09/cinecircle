@@ -11,8 +11,18 @@ SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
 
+  ADD KEY `conversation_id` (`conversation_id`),
+  ADD KEY `sender_id` (`sender_id`),
+  ADD KEY `reply_to_message_id` (`reply_to_message_id`);
 
-/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+--
+-- Indexes for table `message_reactions`
+--
+ALTER TABLE `message_reactions`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uniq_message_user` (`message_id`,`user_id`),
+  ADD KEY `message_id` (`message_id`),
+  ADD KEY `user_id` (`user_id`);
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
 /*!40101 SET NAMES utf8mb4 */;
@@ -504,6 +514,7 @@ CREATE TABLE `messages` (
   `body` text NOT NULL,
   `media_url` varchar(255) DEFAULT NULL,
   `media_type` enum('image','video','audio') DEFAULT NULL,
+  `reply_to_message_id` char(36) DEFAULT NULL,
   `is_read` tinyint(1) DEFAULT 0,
   `sent_at` timestamp NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -515,6 +526,20 @@ CREATE TABLE `messages` (
 INSERT INTO `messages` (`id`, `conversation_id`, `sender_id`, `body`, `media_url`, `media_type`, `is_read`, `sent_at`) VALUES
 ('55136653-970b-48bc-a6aa-13c2c22321d6', '3531b3c1-6de1-424e-82af-a4e3bd0591e0', '46132ac1-5abe-4648-b5df-07f98ea87e07', 'Hi', NULL, NULL, 0, '2026-04-12 04:11:33'),
 ('a24e81da-70bd-44f7-b22e-f57da3f14237', '3531b3c1-6de1-424e-82af-a4e3bd0591e0', '46132ac1-5abe-4648-b5df-07f98ea87e07', 'Hello', NULL, NULL, 0, '2026-04-26 11:22:36');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `message_reactions`
+--
+
+CREATE TABLE `message_reactions` (
+  `id` char(36) NOT NULL,
+  `message_id` char(36) NOT NULL,
+  `user_id` char(36) NOT NULL,
+  `emoji` varchar(16) NOT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
 
@@ -1697,7 +1722,15 @@ ALTER TABLE `job_saves`
 --
 ALTER TABLE `messages`
   ADD CONSTRAINT `messages_ibfk_1` FOREIGN KEY (`conversation_id`) REFERENCES `conversations` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `messages_ibfk_2` FOREIGN KEY (`sender_id`) REFERENCES `cinecircle` (`id`) ON DELETE CASCADE;
+  ADD CONSTRAINT `messages_ibfk_2` FOREIGN KEY (`sender_id`) REFERENCES `cinecircle` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `messages_ibfk_3` FOREIGN KEY (`reply_to_message_id`) REFERENCES `messages` (`id`) ON DELETE SET NULL;
+
+--
+-- Constraints for table `message_reactions`
+--
+ALTER TABLE `message_reactions`
+  ADD CONSTRAINT `message_reactions_ibfk_1` FOREIGN KEY (`message_id`) REFERENCES `messages` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `message_reactions_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `cinecircle` (`id`) ON DELETE CASCADE;
 
 --
 -- Constraints for table `notifications`

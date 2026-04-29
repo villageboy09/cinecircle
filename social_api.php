@@ -308,9 +308,14 @@ try {
 
         $stmt = $pdo->prepare("
             SELECT m.id, m.sender_id, m.body, m.media_url, m.media_type, m.is_read, m.sent_at,
-                   u.full_name AS sender_name, u.profile_image_url AS sender_avatar
+                   m.reply_to_message_id,
+                   u.full_name AS sender_name, u.profile_image_url AS sender_avatar,
+                   r.body AS reply_to_body,
+                   ru.full_name AS reply_to_sender_name
             FROM messages m
             JOIN cinecircle u ON m.sender_id = u.id
+            LEFT JOIN messages r ON m.reply_to_message_id = r.id
+            LEFT JOIN cinecircle ru ON r.sender_id = ru.id
             WHERE m.conversation_id = ?
             ORDER BY m.sent_at DESC
             LIMIT ? OFFSET ?
@@ -319,10 +324,36 @@ try {
         $msgs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         // Reverse so oldest first (chat display order)
         $msgs = array_reverse($msgs);
+
+        $reactionsByMessage = [];
+        $messageIds = array_column($msgs, 'id');
+        if (!empty($messageIds)) {
+            $placeholders = implode(',', array_fill(0, count($messageIds), '?'));
+            $params = array_merge([$myId], $messageIds);
+            $rxStmt = $pdo->prepare("
+                SELECT message_id, emoji, COUNT(*) AS count,
+                       SUM(user_id = ?) AS reacted
+                FROM message_reactions
+                WHERE message_id IN ($placeholders)
+                GROUP BY message_id, emoji
+            ");
+            $rxStmt->execute($params);
+            $rxRows = $rxStmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rxRows as $r) {
+                $mid = $r['message_id'];
+                if (!isset($reactionsByMessage[$mid])) $reactionsByMessage[$mid] = [];
+                $reactionsByMessage[$mid][] = [
+                    'emoji' => $r['emoji'],
+                    'count' => (int)$r['count'],
+                    'reacted' => ((int)$r['reacted']) > 0,
+                ];
+            }
+        }
         foreach ($msgs as &$m) {
             $m['is_me']    = $m['sender_id'] === $myId;
             $m['is_read']  = (bool)$m['is_read'];
             $m['time_ago'] = timeAgo($m['sent_at']);
+            $m['reactions'] = $reactionsByMessage[$m['id']] ?? [];
         }
 
         // Mark all incoming messages as read
@@ -345,6 +376,7 @@ try {
         $body        = trim($_POST['body']       ?? '');
         $mediaUrl    = $_POST['media_url']       ?? null;
         $mediaType   = $_POST['media_type']      ?? null;
+        $replyToId   = $_POST['reply_to_message_id'] ?? null;
 
         if (!$recipientId || (!$body && !$mediaUrl)) {
             echo json_encode(["status" => "error", "message" => "Missing recipient_id or body"]);
@@ -381,11 +413,20 @@ try {
             ")->execute([$snippet, $convId]);
         }
 
+        if ($replyToId) {
+            $replyStmt = $pdo->prepare("SELECT id FROM messages WHERE id = ? AND conversation_id = ?");
+            $replyStmt->execute([$replyToId, $convId]);
+            if (!$replyStmt->fetch()) {
+                echo json_encode(["status" => "error", "message" => "Invalid reply target"]);
+                exit();
+            }
+        }
+
         // Insert message
         $pdo->prepare("
-            INSERT INTO messages (id, conversation_id, sender_id, body, media_url, media_type)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ")->execute([$msgId, $convId, $myId, $body, $mediaUrl, $mediaType]);
+            INSERT INTO messages (id, conversation_id, sender_id, body, media_url, media_type, reply_to_message_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ")->execute([$msgId, $convId, $myId, $body, $mediaUrl, $mediaType, $replyToId]);
 
         // Notification for recipient
         createNotification($pdo, $recipientId, $myId, 'message',
@@ -399,6 +440,58 @@ try {
             "message_id"      => $msgId,
             "conversation_id" => $convId,
         ]);
+    }
+
+    // ── react_message ─────────────────────────────────────
+    elseif ($action === 'react_message') {
+        $messageId = $_POST['message_id'] ?? '';
+        $emoji = $_POST['emoji'] ?? '';
+        if (!$messageId) {
+            echo json_encode(["status" => "error", "message" => "Missing message_id"]);
+            exit();
+        }
+
+        $chk = $pdo->prepare("
+            SELECT m.conversation_id, c.user1_id, c.user2_id
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE m.id = ?
+        ");
+        $chk->execute([$messageId]);
+        $row = $chk->fetch(PDO::FETCH_ASSOC);
+        if (!$row || ($row['user1_id'] !== $myId && $row['user2_id'] !== $myId)) {
+            echo json_encode(["status" => "error", "message" => "Unauthorized"]);
+            exit();
+        }
+
+        $pdo->prepare("DELETE FROM message_reactions WHERE message_id = ? AND user_id = ?")
+            ->execute([$messageId, $myId]);
+
+        if (!empty($emoji)) {
+            $pdo->prepare("INSERT INTO message_reactions (id, message_id, user_id, emoji) VALUES (?, ?, ?, ?)")
+                ->execute([generateUUID(), $messageId, $myId, $emoji]);
+        }
+
+        $rxStmt = $pdo->prepare("
+            SELECT message_id, emoji, COUNT(*) AS count,
+                   SUM(user_id = ?) AS reacted
+            FROM message_reactions
+            WHERE message_id = ?
+            GROUP BY message_id, emoji
+        ");
+        $rxStmt->execute([$myId, $messageId]);
+        $rxRows = $rxStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $reactions = [];
+        foreach ($rxRows as $r) {
+            $reactions[] = [
+                'emoji' => $r['emoji'],
+                'count' => (int)$r['count'],
+                'reacted' => ((int)$r['reacted']) > 0,
+            ];
+        }
+
+        echo json_encode(["status" => "success", "data" => $reactions]);
     }
 
     // ── start_conversation ─────────────────────────────────

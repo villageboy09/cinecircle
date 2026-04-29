@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
+import 'global_notifier.dart';
 
 // ── Aspect ratio options ────────────────────────────────────────────────────
 class _AspectOption {
@@ -176,6 +178,13 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
     final description = _descController.text.trim();
     final uploadFile = _displayFile ?? _rawFile;
 
+    if (description.length > 500) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Post is limited to 500 characters.')),
+      );
+      return;
+    }
+
     if (title.isEmpty && description.isEmpty && uploadFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Add text or media before posting')),
@@ -212,6 +221,13 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
+        try {
+          final data = json.decode(response.body);
+          final postId = data['post_id']?.toString() ?? '';
+          if (postId.isNotEmpty) {
+            await _saveAspectRatio(postId);
+          }
+        } catch (_) {}
         await _awardCredits(mobile);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -252,7 +268,7 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
 
   Future<void> _awardCredits(String mobile) async {
     try {
-      await http.post(
+      final res = await http.post(
         Uri.parse('https://team.cropsync.in/cine_circle/social_api.php'),
         body: {
           'action': 'award_social_credits',
@@ -262,7 +278,25 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
           'description': 'Created a new post in Circle',
         },
       );
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        final balance = int.tryParse(data['new_balance']?.toString() ?? '');
+        if (balance != null) {
+          GlobalNotifier.instance.updateCredits(balance);
+        }
+      }
     } catch (_) {}
+  }
+
+  Future<void> _saveAspectRatio(String postId) async {
+    if (_mediaType != 'image') return;
+    final ratio = _aspectOptions[_selectedRatioIndex].ratio;
+    if (ratio == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('post_aspect_ratios') ?? '{}';
+    final Map<String, dynamic> map = json.decode(raw);
+    map[postId] = ratio;
+    await prefs.setString('post_aspect_ratios', json.encode(map));
   }
 
   // ── Build ────────────────────────────────────────────────────────────────
@@ -373,6 +407,7 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
               const SizedBox(height: 10),
               TextField(
                 controller: _titleController,
+                maxLength: 120,
                 textCapitalization: TextCapitalization.sentences,
                 style: const TextStyle(
                   fontFamily: 'Google Sans',
@@ -415,6 +450,7 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
               const SizedBox(height: 10),
               TextField(
                 controller: _descController,
+                maxLength: 500,
                 maxLines: 3,
                 textCapitalization: TextCapitalization.sentences,
                 style: const TextStyle(

@@ -11,6 +11,7 @@ import 'edit_profile_screen.dart';
 import 'welcome_screen.dart';
 import 'social_cine_credits_screen.dart';
 import 'followers_screen.dart';
+import 'global_notifier.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -162,6 +163,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _socialBalance =
                 int.tryParse(data['data']?['balance']?.toString() ?? '0') ?? 0;
           });
+          GlobalNotifier.instance.updateCredits(_socialBalance);
         }
       }
     } catch (_) {}
@@ -184,6 +186,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _followersCount = data['followers'] ?? 0;
             _followingCount = data['following'] ?? 0;
           });
+          GlobalNotifier.instance.updateFollowCounts(
+            followers: _followersCount,
+            following: _followingCount,
+          );
         }
       }
     } catch (_) {}
@@ -382,32 +388,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                // Stats
+                // Credits chip + Stats
+                GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SocialCineCreditsScreen(),
+                      ),
+                    );
+                  },
+                  child: _buildCreditsIsland(),
+                ),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                const SocialCineCreditsScreen(),
-                          ),
-                        );
-                      },
-                      child: _buildStat(
-                        '$_socialBalance',
-                        'Social Credits',
-                        Icons.stars_rounded,
-                        color: Colors.amber.shade700,
-                      ),
-                    ),
-                    Container(
-                      height: 40,
-                      width: 1,
-                      color: Colors.grey.shade300,
-                    ),
                     GestureDetector(
                       onTap: () {
                         if (_profileData?['id'] == null) return;
@@ -422,10 +418,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ).then((_) => _loadFollowCounts(_userPhone));
                       },
-                      child: _buildStat(
-                        '$_followersCount',
-                        'Followers',
-                        Icons.people_outline,
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: GlobalNotifier.instance.followersCount,
+                        builder: (context, value, _) => _buildStat(
+                          '$value',
+                          'Followers',
+                          Icons.people_outline,
+                        ),
                       ),
                     ),
                     Container(
@@ -447,10 +446,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ).then((_) => _loadFollowCounts(_userPhone));
                       },
-                      child: _buildStat(
-                        '$_followingCount',
-                        'Following',
-                        Icons.person_outline,
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: GlobalNotifier.instance.followingCount,
+                        builder: (context, value, _) => _buildStat(
+                          '$value',
+                          'Following',
+                          Icons.person_outline,
+                        ),
                       ),
                     ),
                   ],
@@ -1116,6 +1118,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCreditsIsland() {
+    return ValueListenableBuilder<int>(
+      valueListenable: GlobalNotifier.instance.creditsBalance,
+      builder: (context, value, _) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade700,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.stars_rounded,
+                  size: 16,
+                  color: Colors.black,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '$value CineCredits',
+                style: const TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.arrow_forward_ios,
+                size: 12,
+                color: Colors.white70,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'public_profile_screen.dart';
+import 'global_notifier.dart';
 
 const _socialApiCard = 'https://team.cropsync.in/cine_circle/social_api.php';
 
@@ -35,12 +36,28 @@ class FollowCard extends StatefulWidget {
 
 class _FollowCardState extends State<FollowCard> {
   bool _isFollowing = false;
-  bool _isLoading   = false;
+  bool _isLoading = false;
+  late final VoidCallback _followListener;
 
   @override
   void initState() {
     super.initState();
-    _isFollowing = widget.initialIsFollowing;
+    final global = GlobalNotifier.instance;
+    _isFollowing =
+        global.followStates.value[widget.userId] ?? widget.initialIsFollowing;
+    _followListener = () {
+      final next = global.followStates.value[widget.userId];
+      if (next != null && next != _isFollowing && mounted) {
+        setState(() => _isFollowing = next);
+      }
+    };
+    global.followStates.addListener(_followListener);
+  }
+
+  @override
+  void dispose() {
+    GlobalNotifier.instance.followStates.removeListener(_followListener);
+    super.dispose();
   }
 
   Future<String> _getMobile() async {
@@ -53,15 +70,21 @@ class _FollowCardState extends State<FollowCard> {
     setState(() => _isLoading = true);
     try {
       final mobile = await _getMobile();
-      final res = await http.post(Uri.parse(_socialApiCard), body: {
-        'action': 'toggle_follow',
-        'mobile_number': mobile,
-        'target_user_id': widget.userId,
-      });
+      final res = await http.post(
+        Uri.parse(_socialApiCard),
+        body: {
+          'action': 'toggle_follow',
+          'mobile_number': mobile,
+          'target_user_id': widget.userId,
+        },
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['status'] == 'success') {
-          setState(() => _isFollowing = data['is_following'] == true);
+          final next = data['is_following'] == true;
+          if (mounted) setState(() => _isFollowing = next);
+          GlobalNotifier.instance.updateFollowState(widget.userId, next);
+          GlobalNotifier.instance.adjustFollowing(next ? 1 : -1);
         }
       }
     } catch (e) {
@@ -74,7 +97,9 @@ class _FollowCardState extends State<FollowCard> {
     if (widget.userId.isEmpty) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => PublicProfileScreen(userId: widget.userId)),
+      MaterialPageRoute(
+        builder: (_) => PublicProfileScreen(userId: widget.userId),
+      ),
     );
   }
 
@@ -98,7 +123,12 @@ class _FollowCardState extends State<FollowCard> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 12, spreadRadius: 2, offset: const Offset(0, 4)),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 12,
+              spreadRadius: 2,
+              offset: const Offset(0, 4),
+            ),
           ],
           border: Border.all(color: Colors.grey.shade100),
         ),
@@ -107,28 +137,59 @@ class _FollowCardState extends State<FollowCard> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Container(
-              width: 80, height: 80,
+              width: 80,
+              height: 80,
               decoration: BoxDecoration(
                 color: Colors.grey.shade200,
                 borderRadius: BorderRadius.circular(20),
-                image: hasImg ? DecorationImage(image: NetworkImage(widget.imageUrl!), fit: BoxFit.cover) : null,
+                image: hasImg
+                    ? DecorationImage(
+                        image: NetworkImage(widget.imageUrl!),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
               ),
-              child: hasImg ? null : Icon(Icons.person, color: Colors.grey.shade400, size: 40),
+              child: hasImg
+                  ? null
+                  : Icon(Icons.person, color: Colors.grey.shade400, size: 40),
             ),
             const SizedBox(height: 12),
             Column(
               children: [
-                Text(widget.name,
-                    style: const TextStyle(fontFamily: 'Google Sans', fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black, letterSpacing: -0.3),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(
+                  widget.name,
+                  style: const TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black,
+                    letterSpacing: -0.3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 const SizedBox(height: 2),
-                Text(widget.role,
-                    style: const TextStyle(fontFamily: 'Google Sans', fontSize: 12, color: Color(0xFF616161)),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(
+                  widget.role,
+                  style: const TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontSize: 12,
+                    color: Color(0xFF616161),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 if (widget.location.isNotEmpty)
-                  Text(widget.location,
-                      style: const TextStyle(fontFamily: 'Google Sans', fontSize: 11, color: Color(0xFF9E9E9E)),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(
+                    widget.location,
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 11,
+                      color: Color(0xFF9E9E9E),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
               ],
             ),
             const Spacer(),
@@ -141,15 +202,31 @@ class _FollowCardState extends State<FollowCard> {
                 decoration: BoxDecoration(
                   color: _isFollowing ? Colors.white : Colors.black,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _isFollowing ? Colors.grey.shade300 : Colors.black),
+                  border: Border.all(
+                    color: _isFollowing ? Colors.grey.shade300 : Colors.black,
+                  ),
                 ),
                 child: _isLoading
-                    ? Center(child: SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: _isFollowing ? Colors.black : Colors.white)))
-                    : Text(_isFollowing ? 'Following' : 'Follow',
+                    ? Center(
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _isFollowing ? Colors.black : Colors.white,
+                          ),
+                        ),
+                      )
+                    : Text(
+                        _isFollowing ? 'Following' : 'Follow',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontFamily: 'Google Sans', color: _isFollowing ? Colors.black87 : Colors.white,
-                            fontSize: 14, fontWeight: FontWeight.w600)),
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          color: _isFollowing ? Colors.black87 : Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
               ),
             ),
           ],
@@ -168,7 +245,11 @@ class _FollowCardState extends State<FollowCard> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2)),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
           ],
           border: Border.all(color: Colors.grey.shade100),
         ),
@@ -176,13 +257,21 @@ class _FollowCardState extends State<FollowCard> {
         child: Row(
           children: [
             Container(
-              width: 48, height: 48,
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
                 color: Colors.grey.shade200,
                 borderRadius: BorderRadius.circular(12),
-                image: hasImg ? DecorationImage(image: NetworkImage(widget.imageUrl!), fit: BoxFit.cover) : null,
+                image: hasImg
+                    ? DecorationImage(
+                        image: NetworkImage(widget.imageUrl!),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
               ),
-              child: hasImg ? null : Icon(Icons.person, color: Colors.grey.shade400),
+              child: hasImg
+                  ? null
+                  : Icon(Icons.person, color: Colors.grey.shade400),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -190,12 +279,27 @@ class _FollowCardState extends State<FollowCard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(widget.name,
-                      style: const TextStyle(fontFamily: 'Google Sans', fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  Text(widget.role,
-                      style: const TextStyle(fontFamily: 'Google Sans', fontSize: 11, color: Color(0xFF616161)),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(
+                    widget.name,
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    widget.role,
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 11,
+                      color: Color(0xFF616161),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),
@@ -204,17 +308,31 @@ class _FollowCardState extends State<FollowCard> {
               onTap: _toggle,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                width: 30, height: 30,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
                   color: _isFollowing ? Colors.grey.shade100 : Colors.black,
                   shape: BoxShape.circle,
-                  border: Border.all(color: _isFollowing ? Colors.grey.shade300 : Colors.black),
+                  border: Border.all(
+                    color: _isFollowing ? Colors.grey.shade300 : Colors.black,
+                  ),
                 ),
                 child: _isLoading
-                    ? Center(child: SizedBox(width: 12, height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 1.5, color: _isFollowing ? Colors.black : Colors.white)))
-                    : Icon(_isFollowing ? Icons.check : Icons.person_add_alt_1,
-                        size: 14, color: _isFollowing ? Colors.black54 : Colors.white),
+                    ? Center(
+                        child: SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: _isFollowing ? Colors.black : Colors.white,
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        _isFollowing ? Icons.check : Icons.person_add_alt_1,
+                        size: 14,
+                        color: _isFollowing ? Colors.black54 : Colors.white,
+                      ),
               ),
             ),
           ],

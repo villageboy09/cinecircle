@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'chat_screen.dart';
 import 'followers_screen.dart';
+import 'global_notifier.dart';
 
 const _socialApiPub = 'https://team.cropsync.in/cine_circle/social_api.php';
 
@@ -52,6 +53,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             _profile = data['data'];
             _isFollowing = _asBool(data['data']['is_following']);
           });
+          GlobalNotifier.instance.updateFollowState(
+            widget.userId,
+            _isFollowing,
+          );
         }
       }
     } catch (e) {
@@ -82,6 +87,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               _profile!['followers'] = data['followers'];
             }
           });
+          GlobalNotifier.instance.updateFollowState(
+            widget.userId,
+            _isFollowing,
+          );
+          GlobalNotifier.instance.adjustFollowing(_isFollowing ? 1 : -1);
         }
       }
     } catch (e) {
