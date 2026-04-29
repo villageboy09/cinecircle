@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -54,9 +55,11 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _isLoading = true);
     try {
       final mobile = await _getMobile();
-      final res = await http.get(Uri.parse(
-        '$_socialApiChat?action=get_messages&mobile_number=$mobile&conversation_id=${widget.conversationId}',
-      ));
+      final res = await http.get(
+        Uri.parse(
+          '$_socialApiChat?action=get_messages&mobile_number=$mobile&conversation_id=${widget.conversationId}',
+        ),
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['status'] == 'success') {
@@ -129,25 +132,44 @@ class _ChatScreenState extends State<ChatScreen> {
         title: Row(
           children: [
             Container(
-              width: 40, height: 40,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 color: Colors.grey.shade300,
                 shape: BoxShape.circle,
                 image: hasAvatar
-                    ? DecorationImage(image: NetworkImage(widget.recipientAvatar), fit: BoxFit.cover)
+                    ? DecorationImage(
+                        image: NetworkImage(widget.recipientAvatar),
+                        fit: BoxFit.cover,
+                      )
                     : null,
               ),
-              child: hasAvatar ? null : const Icon(Icons.person, color: Colors.grey, size: 20),
+              child: hasAvatar
+                  ? null
+                  : const Icon(Icons.person, color: Colors.grey, size: 20),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.recipientName,
-                      style: const TextStyle(fontFamily: 'Google Sans', fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black)),
-                  Text(widget.recipientRole,
-                      style: TextStyle(fontFamily: 'Google Sans', fontSize: 12, color: Colors.grey.shade600)),
+                  Text(
+                    widget.recipientName,
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black,
+                    ),
+                  ),
+                  Text(
+                    widget.recipientRole,
+                    style: TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -159,17 +181,32 @@ class _ChatScreenState extends State<ChatScreen> {
           Divider(color: Colors.grey.shade200, height: 1),
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: Colors.black,
+                      strokeWidth: 2,
+                    ),
+                  )
                 : _messages.isEmpty
-                    ? Center(
-                        child: Text('Say hello! 👋', style: TextStyle(fontFamily: 'Google Sans', color: Colors.grey.shade500, fontSize: 16)),
-                      )
-                    : ListView.builder(
-                        controller: _scrollCtrl,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-                        itemCount: _messages.length,
-                        itemBuilder: (_, i) => _buildBubble(_messages[i]),
+                ? Center(
+                    child: Text(
+                      'Say hello! 👋',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade500,
+                        fontSize: 16,
                       ),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollCtrl,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 24,
+                    ),
+                    itemCount: _messages.length,
+                    itemBuilder: (_, i) => _buildBubble(_messages[i]),
+                  ),
           ),
           // Input bar
           Container(
@@ -194,7 +231,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       style: const TextStyle(fontFamily: 'Google Sans'),
                       decoration: InputDecoration(
                         hintText: 'Type a message...',
-                        hintStyle: TextStyle(fontFamily: 'Google Sans', color: Colors.grey.shade500, fontSize: 15),
+                        hintStyle: TextStyle(
+                          fontFamily: 'Google Sans',
+                          color: Colors.grey.shade500,
+                          fontSize: 15,
+                        ),
                         border: InputBorder.none,
                       ),
                       onSubmitted: (_) => _sendMessage(),
@@ -206,9 +247,17 @@ class _ChatScreenState extends State<ChatScreen> {
                   onTap: _sendMessage,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: 44, height: 44,
-                    decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle),
-                    child: const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(
+                      color: Colors.black,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.send_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                 ),
               ],
@@ -221,31 +270,113 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildBubble(Map<String, dynamic> msg) {
     final bool isMe = msg['is_me'] == true;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-        children: [
-          Container(
-            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-            decoration: BoxDecoration(
-              color: isMe ? Colors.black : Colors.grey.shade100,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(20),
-                topRight: const Radius.circular(20),
-                bottomLeft: Radius.circular(isMe ? 20 : 4),
-                bottomRight: Radius.circular(isMe ? 4 : 20),
+    return GestureDetector(
+      onLongPress: () => _showMessageActions(msg),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: isMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.72,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              decoration: BoxDecoration(
+                color: isMe ? Colors.black : Colors.grey.shade100,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(20),
+                  topRight: const Radius.circular(20),
+                  bottomLeft: Radius.circular(isMe ? 20 : 4),
+                  bottomRight: Radius.circular(isMe ? 4 : 20),
+                ),
+              ),
+              child: Text(
+                msg['body'] ?? '',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 15,
+                  color: isMe ? Colors.white : Colors.black87,
+                  height: 1.4,
+                ),
               ),
             ),
-            child: Text(msg['body'] ?? '',
-                style: TextStyle(fontFamily: 'Google Sans', fontSize: 15, color: isMe ? Colors.white : Colors.black87, height: 1.4)),
-          ),
-          const SizedBox(height: 4),
-          Text(msg['time_ago'] ?? '',
-              style: TextStyle(fontFamily: 'Google Sans', fontSize: 11, color: Colors.grey.shade500)),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              msg['time_ago'] ?? '',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 11,
+                color: Colors.grey.shade500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showMessageActions(Map<String, dynamic> msg) {
+    final body = (msg['body'] ?? '').toString();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.reply, color: Colors.black),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(context);
+                _msgCtrl.text = '> $body\n';
+                _msgCtrl.selection = TextSelection.fromPosition(
+                  TextPosition(offset: _msgCtrl.text.length),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.emoji_emotions_outlined,
+                color: Colors.black,
+              ),
+              title: const Text('React with 👍'),
+              onTap: () {
+                Navigator.pop(context);
+                _msgCtrl.text = '👍';
+                _sendMessage();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.favorite_border, color: Colors.black),
+              title: const Text('React with ❤️'),
+              onTap: () {
+                Navigator.pop(context);
+                _msgCtrl.text = '❤️';
+                _sendMessage();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy, color: Colors.black),
+              title: const Text('Copy text'),
+              onTap: () {
+                Navigator.pop(context);
+                Clipboard.setData(ClipboardData(text: body));
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

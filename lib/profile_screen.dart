@@ -24,6 +24,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<dynamic> _skillsList = [];
   List<dynamic> _creditsList = [];
   List<dynamic> _reelsList = [];
+  List<dynamic> _postsList = [];
+  List<dynamic> _savedPostsList = [];
 
   String _userName = 'Loading...';
   String _accountType = 'Loading...';
@@ -31,6 +33,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _followersCount = 0;
   int _followingCount = 0;
   int _socialBalance = 0;
+  bool _isPostsLoading = false;
+  bool _isSavedPostsLoading = false;
 
   @override
   void initState() {
@@ -73,6 +77,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // Fetch follow counts after profile data is available (needs id)
             _loadFollowCounts(mobile);
             _loadSocialCredits(mobile);
+            _loadUserPosts(mobile);
+            _loadSavedPosts(mobile);
           }
           return;
         }
@@ -92,6 +98,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Fetch follow counts from social API
     _loadFollowCounts(mobile);
     _loadSocialCredits(mobile);
+    _loadUserPosts(mobile);
+    _loadSavedPosts(mobile);
+  }
+
+  Future<void> _loadUserPosts(String mobile) async {
+    try {
+      if (mounted) setState(() => _isPostsLoading = true);
+      final targetUserId = _profileData?['id']?.toString() ?? '';
+      if (targetUserId.isEmpty) return;
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/social_api.php?action=get_user_posts&mobile_number=$mobile&target_user_id=$targetUserId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == 'success' && mounted) {
+          setState(() {
+            _postsList = data['data'] ?? [];
+          });
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isPostsLoading = false);
+    }
+  }
+
+  Future<void> _loadSavedPosts(String mobile) async {
+    try {
+      if (mounted) setState(() => _isSavedPostsLoading = true);
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_saved_posts&mobile_number=$mobile',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == 'success' && mounted) {
+          setState(() {
+            _savedPostsList = data['data'] ?? [];
+          });
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isSavedPostsLoading = false);
+    }
   }
 
   Future<void> _loadSocialCredits(String mobile) async {
@@ -106,10 +160,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (data['status'] == 'success' && mounted) {
           setState(() {
             _socialBalance =
-                int.tryParse(
-                  data['data']?['balance']?.toString() ?? '0',
-                ) ??
-                0;
+                int.tryParse(data['data']?['balance']?.toString() ?? '0') ?? 0;
           });
         }
       }
@@ -340,7 +391,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const SocialCineCreditsScreen(),
+                            builder: (context) =>
+                                const SocialCineCreditsScreen(),
                           ),
                         );
                       },
@@ -549,6 +601,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             .map((s) => _buildSkillChip(s['skill_name'] ?? ''))
                             .toList(),
                       ),
+                const SizedBox(height: 24),
+                DefaultTabController(
+                  length: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TabBar(
+                        labelColor: Colors.black,
+                        unselectedLabelColor: Colors.grey.shade500,
+                        indicatorColor: Colors.black,
+                        tabs: const [
+                          Tab(text: 'Posts'),
+                          Tab(text: 'Saved'),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 420,
+                        child: TabBarView(
+                          children: [
+                            _buildPostGrid(
+                              posts: _postsList,
+                              isLoading: _isPostsLoading,
+                              emptyText:
+                                  'No posts yet. Your posts will appear here.',
+                            ),
+                            _buildPostGrid(
+                              posts: _savedPostsList,
+                              isLoading: _isSavedPostsLoading,
+                              emptyText: 'No saved posts yet.',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
                 const SizedBox(height: 32),
                 SizedBox(
                   width: double.infinity,
@@ -1145,6 +1235,131 @@ class _ProfileScreenState extends State<ProfileScreen> {
           fontWeight: FontWeight.w500,
         ),
       ),
+    );
+  }
+
+  Widget _buildPostGrid({
+    required List<dynamic> posts,
+    required bool isLoading,
+    required String emptyText,
+  }) {
+    if (isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2),
+      );
+    }
+
+    if (posts.isEmpty) {
+      return Center(
+        child: Text(
+          emptyText,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Google Sans',
+            color: Colors.grey.shade500,
+            fontSize: 14,
+          ),
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: EdgeInsets.zero,
+      physics: const BouncingScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.78,
+      ),
+      itemCount: posts.length,
+      itemBuilder: (context, index) {
+        final post = posts[index] as Map<String, dynamic>;
+        final mediaUrl = (post['media_url'] ?? '').toString();
+        final hasMedia = mediaUrl.isNotEmpty;
+        final isVideo = post['media_type'] == 'video';
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(18),
+                  ),
+                  child: Container(
+                    width: double.infinity,
+                    color: Colors.grey.shade100,
+                    child: hasMedia
+                        ? isVideo
+                              ? Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    Container(color: Colors.black12),
+                                    const Center(
+                                      child: Icon(
+                                        Icons.play_circle_fill,
+                                        size: 54,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : CachedNetworkImage(
+                                  imageUrl: mediaUrl,
+                                  fit: BoxFit.cover,
+                                )
+                        : const Center(
+                            child: Icon(
+                              Icons.article_outlined,
+                              size: 42,
+                              color: Colors.black45,
+                            ),
+                          ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      (post['title'] ?? '').toString().isNotEmpty
+                          ? post['title'].toString()
+                          : (post['description'] ?? '').toString().isNotEmpty
+                          ? post['description'].toString()
+                          : 'Untitled post',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${post['likes_count'] ?? 0} likes · ${post['comments_count'] ?? 0} comments',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

@@ -7,6 +7,9 @@ import 'followers_screen.dart';
 
 const _socialApiPub = 'https://team.cropsync.in/cine_circle/social_api.php';
 
+bool _asBool(dynamic value) =>
+    value == true || value == 1 || value == '1' || value == 'true';
+
 class PublicProfileScreen extends StatefulWidget {
   final String userId;
 
@@ -37,15 +40,17 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     setState(() => _isLoading = true);
     try {
       final mobile = await _getMobile();
-      final res = await http.get(Uri.parse(
-        '$_socialApiPub?action=get_user_profile&mobile_number=$mobile&target_user_id=${widget.userId}',
-      ));
+      final res = await http.get(
+        Uri.parse(
+          '$_socialApiPub?action=get_user_profile&mobile_number=$mobile&target_user_id=${widget.userId}',
+        ),
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['status'] == 'success') {
           setState(() {
-            _profile     = data['data'];
-            _isFollowing = data['data']['is_following'] == true;
+            _profile = data['data'];
+            _isFollowing = _asBool(data['data']['is_following']);
           });
         }
       }
@@ -60,16 +65,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     setState(() => _isTogglingFollow = true);
     try {
       final mobile = await _getMobile();
-      final res = await http.post(Uri.parse(_socialApiPub), body: {
-        'action': 'toggle_follow',
-        'mobile_number': mobile,
-        'target_user_id': widget.userId,
-      });
+      final res = await http.post(
+        Uri.parse(_socialApiPub),
+        body: {
+          'action': 'toggle_follow',
+          'mobile_number': mobile,
+          'target_user_id': widget.userId,
+        },
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['status'] == 'success') {
           setState(() {
-            _isFollowing = data['is_following'] == true;
+            _isFollowing = _asBool(data['is_following']);
             if (_profile != null) {
               _profile!['followers'] = data['followers'];
             }
@@ -85,11 +93,14 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   Future<void> _openChat() async {
     try {
       final mobile = await _getMobile();
-      final res = await http.post(Uri.parse(_socialApiPub), body: {
-        'action': 'start_conversation',
-        'mobile_number': mobile,
-        'recipient_id': widget.userId,
-      });
+      final res = await http.post(
+        Uri.parse(_socialApiPub),
+        body: {
+          'action': 'start_conversation',
+          'mobile_number': mobile,
+          'recipient_id': widget.userId,
+        },
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['status'] == 'success' && mounted) {
@@ -122,19 +133,29 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         iconTheme: const IconThemeData(color: Colors.black),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+          ? const Center(
+              child: CircularProgressIndicator(
+                color: Colors.black,
+                strokeWidth: 2,
+              ),
+            )
           : _profile == null
-              ? const Center(child: Text('Profile not found', style: TextStyle(fontFamily: 'Google Sans')))
-              : _buildProfile(),
+          ? const Center(
+              child: Text(
+                'Profile not found',
+                style: TextStyle(fontFamily: 'Google Sans'),
+              ),
+            )
+          : _buildProfile(),
     );
   }
 
   Widget _buildProfile() {
     final p = _profile!;
-    final bool hasImg  = (p['profile_image_url'] ?? '').isNotEmpty;
-    final List skills  = p['skills'] ?? [];
+    final bool hasImg = (p['profile_image_url'] ?? '').isNotEmpty;
+    final List skills = p['skills'] ?? [];
     final List credits = p['credits'] ?? [];
-    final List reels   = p['reels'] ?? [];
+    final List reels = p['reels'] ?? [];
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -147,16 +168,22 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 80, height: 80,
+                width: 80,
+                height: 80,
                 decoration: BoxDecoration(
                   color: Colors.grey.shade200,
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.grey.shade300, width: 2),
                   image: hasImg
-                      ? DecorationImage(image: NetworkImage(p['profile_image_url']), fit: BoxFit.cover)
+                      ? DecorationImage(
+                          image: NetworkImage(p['profile_image_url']),
+                          fit: BoxFit.cover,
+                        )
                       : null,
                 ),
-                child: hasImg ? null : const Icon(Icons.person, size: 40, color: Colors.grey),
+                child: hasImg
+                    ? null
+                    : const Icon(Icons.person, size: 40, color: Colors.grey),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -166,28 +193,68 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     Row(
                       children: [
                         Flexible(
-                          child: Text(p['full_name'] ?? '',
-                              style: const TextStyle(fontFamily: 'Google Sans', fontSize: 20, fontWeight: FontWeight.w600),
-                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            p['full_name'] ?? '',
+                            style: const TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         if (p['follows_you'] == true) ...[
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
-                            child: const Text('Follows you', style: TextStyle(fontFamily: 'Google Sans', fontSize: 11, color: Colors.black54)),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Follows you',
+                              style: TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontSize: 11,
+                                color: Colors.black54,
+                              ),
+                            ),
                           ),
                         ],
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(p['role_title'] ?? '', style: const TextStyle(fontFamily: 'Google Sans', fontSize: 14, color: Colors.black54)),
+                    Text(
+                      p['role_title'] ?? '',
+                      style: const TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 14,
+                        color: Colors.black54,
+                      ),
+                    ),
                     if ((p['city'] ?? '').isNotEmpty)
-                      Row(children: [
-                        Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade500),
-                        const SizedBox(width: 2),
-                        Text(p['city'], style: TextStyle(fontFamily: 'Google Sans', fontSize: 12, color: Colors.grey.shade500)),
-                      ]),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.location_on_outlined,
+                            size: 13,
+                            color: Colors.grey.shade500,
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            p['city'],
+                            style: TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -206,16 +273,31 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     decoration: BoxDecoration(
                       color: _isFollowing ? Colors.white : Colors.black,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: _isFollowing ? Colors.grey.shade300 : Colors.black),
+                      border: Border.all(
+                        color: _isFollowing
+                            ? Colors.grey.shade300
+                            : Colors.black,
+                      ),
                     ),
                     alignment: Alignment.center,
                     child: _isTogglingFollow
-                        ? SizedBox(width: 18, height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2,
-                                color: _isFollowing ? Colors.black : Colors.white))
-                        : Text(_isFollowing ? 'Following ✓' : 'Follow',
-                            style: TextStyle(fontFamily: 'Google Sans', fontWeight: FontWeight.w600, fontSize: 15,
-                                color: _isFollowing ? Colors.black : Colors.white)),
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: _isFollowing ? Colors.black : Colors.white,
+                            ),
+                          )
+                        : Text(
+                            _isFollowing ? 'Following ✓' : 'Follow',
+                            style: TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                              color: _isFollowing ? Colors.black : Colors.white,
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -236,7 +318,14 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       children: [
                         Icon(Icons.chat_bubble_outline, size: 16),
                         SizedBox(width: 6),
-                        Text('Message', style: TextStyle(fontFamily: 'Google Sans', fontWeight: FontWeight.w600, fontSize: 15)),
+                        Text(
+                          'Message',
+                          style: TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -283,49 +372,113 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           Divider(height: 32, color: Colors.grey.shade200),
           // — Bio —
           if ((p['bio'] ?? '').isNotEmpty) ...[
-            const Text('About', style: TextStyle(fontFamily: 'Google Sans', fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'About',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 8),
-            Text(p['bio'], style: const TextStyle(fontFamily: 'Google Sans', fontSize: 15, color: Colors.black87, height: 1.5)),
+            Text(
+              p['bio'],
+              style: const TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 15,
+                color: Colors.black87,
+                height: 1.5,
+              ),
+            ),
             Divider(height: 32, color: Colors.grey.shade200),
           ],
           // — Skills —
           if (skills.isNotEmpty) ...[
-            const Text('Skills', style: TextStyle(fontFamily: 'Google Sans', fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Skills',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 12),
             Wrap(
-              spacing: 8, runSpacing: 8,
-              children: skills.map<Widget>((s) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: Text(s.toString(), style: const TextStyle(fontFamily: 'Google Sans', fontSize: 13)),
-              )).toList(),
+              spacing: 8,
+              runSpacing: 8,
+              children: skills
+                  .map<Widget>(
+                    (s) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        s.toString(),
+                        style: const TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
             ),
             Divider(height: 32, color: Colors.grey.shade200),
           ],
           // — Credits —
           if (credits.isNotEmpty) ...[
-            const Text('Credits', style: TextStyle(fontFamily: 'Google Sans', fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Credits',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 12),
-            ...credits.map<Widget>((c) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(children: [
-                const Icon(Icons.radio_button_checked, size: 8, color: Colors.black45),
-                const SizedBox(width: 10),
-                Expanded(child: Text(
-                  '${c['role']} — "${c['project_title']}"${c['year'] != null ? ' (${c['year']})' : ''}',
-                  style: const TextStyle(fontFamily: 'Google Sans', fontSize: 14, color: Colors.black87),
-                )),
-              ]),
-            )),
+            ...credits.map<Widget>(
+              (c) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.radio_button_checked,
+                      size: 8,
+                      color: Colors.black45,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${c['role']} — "${c['project_title']}"${c['year'] != null ? ' (${c['year']})' : ''}',
+                        style: const TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             Divider(height: 32, color: Colors.grey.shade200),
           ],
           // — Reels —
           if (reels.isNotEmpty) ...[
-            const Text('Featured Reels', style: TextStyle(fontFamily: 'Google Sans', fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Featured Reels',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 12),
             SizedBox(
               height: 120,
@@ -343,15 +496,24 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       decoration: BoxDecoration(
                         color: Colors.grey.shade200,
                         image: hasThumbnail
-                            ? DecorationImage(image: NetworkImage(r['thumbnail_url']), fit: BoxFit.cover)
+                            ? DecorationImage(
+                                image: NetworkImage(r['thumbnail_url']),
+                                fit: BoxFit.cover,
+                              )
                             : null,
                       ),
                       alignment: Alignment.bottomLeft,
                       padding: const EdgeInsets.all(8),
-                      child: Text(r['title'] ?? '',
-                          style: TextStyle(fontFamily: 'Google Sans', fontSize: 12, fontWeight: FontWeight.w600,
-                              color: hasThumbnail ? Colors.white : Colors.black87),
-                          maxLines: 2),
+                      child: Text(
+                        r['title'] ?? '',
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: hasThumbnail ? Colors.white : Colors.black87,
+                        ),
+                        maxLines: 2,
+                      ),
                     ),
                   );
                 },
@@ -367,9 +529,24 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   Widget _buildStat(String count, String label) {
     return Column(
       children: [
-        Text(count, style: const TextStyle(fontFamily: 'Google Sans', fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black)),
+        Text(
+          count,
+          style: const TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
+          ),
+        ),
         const SizedBox(height: 2),
-        Text(label, style: TextStyle(fontFamily: 'Google Sans', fontSize: 13, color: Colors.grey.shade600)),
+        Text(
+          label,
+          style: TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 13,
+            color: Colors.grey.shade600,
+          ),
+        ),
       ],
     );
   }

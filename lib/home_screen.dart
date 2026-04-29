@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,7 @@ import 'activity_screen.dart';
 import 'follow_card.dart';
 import 'create_post_sheet.dart';
 import 'feed_video_player.dart';
+import 'public_profile_screen.dart';
 import 'package:shimmer/shimmer.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -179,7 +181,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  savedState ? 'Post saved to bookmarks' : 'Post removed from bookmarks',
+                  savedState
+                      ? 'Post saved to bookmarks'
+                      : 'Post removed from bookmarks',
                   style: const TextStyle(fontFamily: 'Google Sans'),
                 ),
                 behavior: SnackBarBehavior.floating,
@@ -260,6 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showPostOptions(Map<String, dynamic> post) {
     final bool isOwner = post['user_id']?.toString() == _currentUserId;
+    final bool canEdit = isOwner && _canEditPost(post['created_at']);
 
     showModalBottomSheet(
       context: context,
@@ -299,20 +304,229 @@ class _HomeScreenState extends State<HomeScreen> {
                   _confirmDelete(post['id'].toString());
                 },
               ),
-            _buildOptionItem(
-              label: 'Report Post',
-              icon: Icons.report_problem_outlined,
-              onTap: () => Navigator.pop(context),
-            ),
+            if (canEdit)
+              _buildOptionItem(
+                label: 'Edit Post',
+                icon: Icons.edit_outlined,
+                onTap: () {
+                  Navigator.pop(context);
+                  _openEditPostSheet(post);
+                },
+              ),
             _buildOptionItem(
               label: 'Share Post',
               icon: Icons.ios_share,
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                _sharePost(post);
+              },
             ),
             const SizedBox(height: 20),
           ],
         ),
       ),
+    );
+  }
+
+  bool _canEditPost(dynamic createdAt) {
+    if (createdAt == null) return false;
+    try {
+      final created = DateTime.parse(createdAt.toString()).toLocal();
+      return DateTime.now().difference(created).inMinutes <= 15;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _sharePost(Map<String, dynamic> post) {
+    final title = (post['title'] ?? '').toString().trim();
+    final description = (post['description'] ?? '').toString().trim();
+    final postId = post['id']?.toString() ?? '';
+    final shareText = [
+      if (title.isNotEmpty) title,
+      if (description.isNotEmpty) description,
+      if (postId.isNotEmpty) 'Post ID: $postId',
+    ].join('\n\n');
+
+    Clipboard.setData(ClipboardData(text: shareText));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Post copied to clipboard')));
+  }
+
+  void _openEditPostSheet(Map<String, dynamic> post) {
+    final titleController = TextEditingController(
+      text: (post['title'] ?? '').toString(),
+    );
+    final descriptionController = TextEditingController(
+      text: (post['description'] ?? '').toString(),
+    );
+    final categories = <String>[
+      'Update',
+      'Project Update',
+      'Casting Call',
+      'Screening Room',
+      'Behind the Scenes',
+      'Community Highlight',
+    ];
+    String selectedCategory = (post['category'] ?? 'Update').toString();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          margin: const EdgeInsets.all(16),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Edit Post',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: titleController,
+                maxLength: 120,
+                decoration: InputDecoration(
+                  labelText: 'Caption',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: selectedCategory,
+                items: categories
+                    .map(
+                      (value) =>
+                          DropdownMenuItem(value: value, child: Text(value)),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setModalState(() => selectedCategory = value);
+                },
+                decoration: InputDecoration(
+                  labelText: 'Category',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: descriptionController,
+                maxLines: 4,
+                maxLength: 500,
+                decoration: InputDecoration(
+                  labelText: 'Description',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final postId = post['id']?.toString() ?? '';
+                    if (postId.isEmpty) return;
+                    Navigator.pop(context);
+                    await _updatePost(
+                      postId: postId,
+                      title: titleController.text.trim(),
+                      description: descriptionController.text.trim(),
+                      category: selectedCategory,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text('Save Changes'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updatePost({
+    required String postId,
+    required String title,
+    required String description,
+    required String category,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mobile = prefs.getString('user_phone') ?? '';
+      final response = await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/social_api.php'),
+        body: {
+          'action': 'update_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+          'title': title,
+          'description': description,
+          'category': category,
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          await _fetchHomeFeed();
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Post updated')));
+          }
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(data['message'] ?? 'Unable to update post')),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Update post error: $e');
+    }
+  }
+
+  void _openAuthorProfile(Map<String, dynamic> post) {
+    final authorId = post['user_id']?.toString() ?? '';
+    if (authorId.isEmpty) return;
+    if (authorId == _currentUserId) {
+      setState(() => _selectedIndex = 5);
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PublicProfileScreen(userId: authorId)),
     );
   }
 
@@ -770,7 +984,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: _selectedIndex == 0 
+      floatingActionButton: _selectedIndex == 0
           ? AnimatedSlide(
               duration: const Duration(milliseconds: 300),
               offset: _showFab ? Offset.zero : const Offset(0, 3.5),
@@ -809,7 +1023,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final String likesCount = (post['likes_count'] ?? '0').toString();
     final String commentsCount = (post['comments_count'] ?? '0').toString();
     final String viewsCount = (post['views_count'] ?? '0').toString();
-    final bool isVideo = post['media_type'] == 'video';
 
     // Record view fire-and-forget (only once per postId per session)
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -828,39 +1041,45 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: Colors.grey.shade200,
-                  backgroundImage: profileImg.isNotEmpty
-                      ? NetworkImage(profileImg)
-                      : null,
-                  child: profileImg.isEmpty
-                      ? Icon(Icons.person, color: Colors.grey.shade500)
-                      : null,
+                GestureDetector(
+                  onTap: () => _openAuthorProfile(post),
+                  child: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.grey.shade200,
+                    backgroundImage: profileImg.isNotEmpty
+                        ? NetworkImage(profileImg)
+                        : null,
+                    child: profileImg.isEmpty
+                        ? Icon(Icons.person, color: Colors.grey.shade500)
+                        : null,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        fullName,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black,
+                  child: GestureDetector(
+                    onTap: () => _openAuthorProfile(post),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          fullName,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black,
+                          ),
                         ),
-                      ),
-                      Text(
-                        timeAgo,
-                        style: TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
+                        Text(
+                          timeAgo,
+                          style: TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 IconButton(
@@ -924,60 +1143,29 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          // Media Container with 4:5 Aspect Ratio for Images
-          GestureDetector(
-            onDoubleTap: () => _toggleLike(index),
-            child: Container(
-              width: double.infinity,
-              color: Colors.grey.shade100,
-              child: post['media_url'] != null && post['media_type'] == 'image'
-                  ? AspectRatio(
-                      aspectRatio: 4 / 5,
-                      child: Image.network(
-                        post['media_url'],
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                      ),
-                    )
-                  : post['media_url'] != null && post['media_type'] == 'video'
-                  ? FeedVideoPlayer(videoUrl: post['media_url'])
-                  : SizedBox(
-                      height: 220, // Final fallback logic
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          if (isVideo)
-                            const Icon(
-                              Icons.videocam_outlined,
-                              color: Colors.grey,
-                              size: 64,
-                            ),
-                          if (isVideo)
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                shape: BoxShape.circle,
-                              ),
-                              padding: const EdgeInsets.all(12),
-                              child: const Icon(
-                                Icons.play_arrow,
-                                color: Colors.white,
-                                size: 32,
-                              ),
-                            ),
-                          if (!isVideo)
-                            const Icon(
-                              Icons.image_outlined,
-                              color: Colors.grey,
-                              size: 64,
-                            ),
-                        ],
-                      ),
-                    ),
+          if ((post['media_url'] ?? '').toString().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            GestureDetector(
+              onDoubleTap: () => _toggleLike(index),
+              child: Container(
+                width: double.infinity,
+                color: Colors.grey.shade100,
+                child: post['media_type'] == 'image'
+                    ? AspectRatio(
+                        aspectRatio: 4 / 5,
+                        child: Image.network(
+                          post['media_url'],
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                        ),
+                      )
+                    : post['media_type'] == 'video'
+                    ? FeedVideoPlayer(videoUrl: post['media_url'])
+                    : const SizedBox.shrink(),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
+          ],
           // Actions
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -1185,6 +1373,12 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   List<dynamic> _comments = [];
   bool _isLoading = true;
   bool _isSending = false;
+  final List<String> _quickComments = const [
+    'Great work!',
+    'Interested in this.',
+    'Looks amazing.',
+    'Sent you a DM.',
+  ];
 
   @override
   void initState() {
@@ -1308,6 +1502,32 @@ class _CommentsSheetState extends State<_CommentsSheet> {
             ),
             const SizedBox(height: 12),
             const Divider(height: 1),
+            if (_quickComments.isNotEmpty)
+              SizedBox(
+                height: 56,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                  itemCount: _quickComments.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final text = _quickComments[index];
+                    return ActionChip(
+                      label: Text(
+                        text,
+                        style: const TextStyle(fontFamily: 'Google Sans'),
+                      ),
+                      onPressed: () {
+                        _controller.text = text;
+                        _controller.selection = TextSelection.fromPosition(
+                          TextPosition(offset: _controller.text.length),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
             // Comments List
             Expanded(
               child: _isLoading
@@ -1416,6 +1636,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                     child: TextField(
                       controller: _controller,
                       textCapitalization: TextCapitalization.sentences,
+                      maxLength: 280,
                       decoration: InputDecoration(
                         hintText: 'Write a comment...',
                         hintStyle: TextStyle(

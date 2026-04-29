@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'login_screen.dart';
@@ -15,13 +16,29 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   int _selectedTypeIndex = 0;
   final List<String> _accountTypes = ['Public', 'Professional', 'Company'];
-  
+
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmController = TextEditingController();
-  
+
   bool _isLoading = false;
+
+  bool _isValidName(String value) {
+    return RegExp(r"^[A-Za-z][A-Za-z .'-]{1,59}$").hasMatch(value.trim());
+  }
+
+  bool _isValidPhone(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 10) return false;
+    if (RegExp(r'^(\d)\1{9}$').hasMatch(digits)) return false;
+    if (digits == '1234567890' ||
+        digits == '0123456789' ||
+        digits == '0987654321') {
+      return false;
+    }
+    return true;
+  }
 
   Future<void> _signup() async {
     final String name = _nameController.text.trim();
@@ -37,10 +54,24 @@ class _SignupScreenState extends State<SignupScreen> {
       return;
     }
 
-    if (password != confirm) {
+    if (!_isValidName(name)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Passwords do not match.')),
+        const SnackBar(content: Text('Enter a valid name using letters only.')),
       );
+      return;
+    }
+
+    if (!_isValidPhone(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid 10-digit phone number.')),
+      );
+      return;
+    }
+
+    if (password != confirm) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Passwords do not match.')));
       return;
     }
 
@@ -63,27 +94,27 @@ class _SignupScreenState extends State<SignupScreen> {
       final data = json.decode(response.body);
 
       if (data['status'] == 'success') {
-         final prefs = await SharedPreferences.getInstance();
-         await prefs.setString('user_name', name);
-         await prefs.setString('user_phone', phone);
-         await prefs.setString('account_type', accountType);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_name', name);
+        await prefs.setString('user_phone', phone);
+        await prefs.setString('account_type', accountType);
 
-         if (!mounted) return;
-         Navigator.pushReplacement(
-           context,
-           MaterialPageRoute(builder: (context) => const HomeScreen()),
-         );
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
       } else {
-         if (!mounted) return;
-         ScaffoldMessenger.of(context).showSnackBar(
-           SnackBar(content: Text(data['message'] ?? 'Signup failed')),
-         );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Signup failed')),
+        );
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Network error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Network error: $e')));
     } finally {
       if (mounted) {
         setState(() {
@@ -154,6 +185,9 @@ class _SignupScreenState extends State<SignupScreen> {
                 hint: 'Full name',
                 icon: Icons.person_outline,
                 controller: _nameController,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z .'-]")),
+                ],
               ),
               const SizedBox(height: 16),
               _buildTextField(
@@ -161,6 +195,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 icon: Icons.phone_outlined,
                 keyboardType: TextInputType.phone,
                 controller: _phoneController,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
               const SizedBox(height: 16),
               _buildTextField(
@@ -234,20 +269,23 @@ class _SignupScreenState extends State<SignupScreen> {
                   elevation: 0,
                   disabledBackgroundColor: Colors.grey.shade400,
                 ),
-                child: _isLoading 
-                  ? const SizedBox(
-                      height: 20, 
-                      width: 20, 
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                    )
-                  : const Text(
-                      'Sign Up',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text(
+                        'Sign Up',
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
               ),
               const SizedBox(height: 20),
               // Terms
@@ -326,11 +364,13 @@ class _SignupScreenState extends State<SignupScreen> {
     bool obscureText = false,
     TextInputType? keyboardType,
     TextEditingController? controller,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextField(
       controller: controller,
       obscureText: obscureText,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       style: const TextStyle(
         fontFamily: 'Google Sans',
         fontSize: 16,

@@ -639,6 +639,68 @@ try {
         ]);
     }
 
+        elseif ($action === 'get_user_posts') {
+            $targetId = $_GET['target_user_id'] ?? $myId;
+            $stmt = $pdo->prepare("
+                SELECT 
+                    p.id, p.user_id, p.category, p.title, p.description,
+                    p.media_url, p.media_type, p.created_at,
+                    u.full_name as author_name, u.role_title, u.profile_image_url,
+                    (SELECT COUNT(*) FROM feed_likes WHERE post_id = p.id) as likes_count,
+                    (SELECT COUNT(*) FROM feed_comments WHERE post_id = p.id) as comments_count,
+                    (SELECT COUNT(*) FROM feed_views WHERE post_id = p.id) as views_count,
+                    EXISTS(SELECT 1 FROM feed_likes WHERE post_id = p.id AND user_id = ?) as is_liked,
+                    EXISTS(SELECT 1 FROM feed_saves WHERE post_id = p.id AND user_id = ?) as is_saved
+                FROM feed_posts p
+                JOIN cinecircle u ON p.user_id = u.id
+                WHERE p.user_id = ?
+                ORDER BY p.created_at DESC
+            ");
+            $stmt->execute([$myId, $myId, $targetId]);
+            $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode(["status" => "success", "data" => $posts]);
+        }
+
+        elseif ($action === 'update_post') {
+            $postId = $_POST['post_id'] ?? '';
+            $title = trim($_POST['title'] ?? '');
+            $description = trim($_POST['description'] ?? '');
+            $category = trim($_POST['category'] ?? 'Other');
+
+            if (!$postId) {
+                echo json_encode(["status" => "error", "message" => "Missing post_id"]);
+                exit();
+            }
+
+            $stmt = $pdo->prepare("SELECT user_id, created_at FROM feed_posts WHERE id = ?");
+            $stmt->execute([$postId]);
+            $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$post) {
+                echo json_encode(["status" => "error", "message" => "Post not found"]);
+                exit();
+            }
+
+            if ($post['user_id'] !== $myId) {
+                echo json_encode(["status" => "error", "message" => "Unauthorized"]);
+                exit();
+            }
+
+            $createdAt = new DateTime($post['created_at']);
+            $diff = (new DateTime())->diff($createdAt);
+            $ageMinutes = $diff->days * 24 * 60 + $diff->h * 60 + $diff->i;
+            if ($ageMinutes > 15) {
+                echo json_encode(["status" => "error", "message" => "Editing is allowed only within 15 minutes of posting"]);
+                exit();
+            }
+
+            $update = $pdo->prepare("UPDATE feed_posts SET title = ?, description = ?, category = ? WHERE id = ?");
+            $update->execute([$title, $description, $category, $postId]);
+
+            echo json_encode(["status" => "success", "message" => "Post updated"]);
+        }
+
     elseif ($action === 'delete_post') {
         $postId = $_POST['post_id'] ?? '';
         if (!$postId) {

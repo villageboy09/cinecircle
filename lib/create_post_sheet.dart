@@ -23,10 +23,30 @@ class _AspectOption {
 }
 
 const _aspectOptions = <_AspectOption>[
-  _AspectOption(label: '1:1', sublabel: 'Square', ratio: 1.0,    icon: Icons.crop_square),
-  _AspectOption(label: '4:5', sublabel: 'Portrait', ratio: 4/5,  icon: Icons.crop_portrait),
-  _AspectOption(label: '16:9', sublabel: 'Wide', ratio: 16/9,    icon: Icons.crop_landscape),
-  _AspectOption(label: 'Full', sublabel: 'Original', ratio: null, icon: Icons.crop_free),
+  _AspectOption(
+    label: '1:1',
+    sublabel: 'Square',
+    ratio: 1.0,
+    icon: Icons.crop_square,
+  ),
+  _AspectOption(
+    label: '4:5',
+    sublabel: 'Portrait',
+    ratio: 4 / 5,
+    icon: Icons.crop_portrait,
+  ),
+  _AspectOption(
+    label: '16:9',
+    sublabel: 'Wide',
+    ratio: 16 / 9,
+    icon: Icons.crop_landscape,
+  ),
+  _AspectOption(
+    label: 'Full',
+    sublabel: 'Original',
+    ratio: null,
+    icon: Icons.crop_free,
+  ),
 ];
 
 class CreatePostSheet extends StatefulWidget {
@@ -38,14 +58,14 @@ class CreatePostSheet extends StatefulWidget {
 
 class _CreatePostSheetState extends State<CreatePostSheet> {
   final _titleController = TextEditingController();
-  final _descController  = TextEditingController();
+  final _descController = TextEditingController();
 
-  String _category  = 'Project Update';
-  File?  _rawFile;       // original picked file (no crop applied)
-  File?  _displayFile;   // file used for preview / upload (cropped copy)
+  String _category = 'Project Update';
+  File? _rawFile; // original picked file (no crop applied)
+  File? _displayFile; // file used for preview / upload (cropped copy)
   String _mediaType = 'image';
-  bool   _isPosting = false;
-  int    _selectedRatioIndex = 1; // default: 4:5 Portrait
+  bool _isPosting = false;
+  int _selectedRatioIndex = 1; // default: 4:5 Portrait
 
   final List<String> _categories = [
     'Project Update',
@@ -75,7 +95,7 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
 
     final raw = File(picked.path);
     setState(() {
-      _rawFile   = raw;
+      _rawFile = raw;
       _mediaType = isVideo ? 'video' : 'image';
     });
 
@@ -99,7 +119,10 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
     try {
       final Uint8List bytes = await _rawFile!.readAsBytes();
       img.Image? decoded = img.decodeImage(bytes);
-      if (decoded == null) { setState(() => _displayFile = _rawFile); return; }
+      if (decoded == null) {
+        setState(() => _displayFile = _rawFile);
+        return;
+      }
 
       final double current = decoded.width / decoded.height;
 
@@ -110,17 +133,31 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
         // Too wide → trim sides
         final int w = (decoded.height * ratio).toInt();
         final int x = (decoded.width - w) ~/ 2;
-        cropped = img.copyCrop(decoded, x: x, y: 0, width: w, height: decoded.height);
+        cropped = img.copyCrop(
+          decoded,
+          x: x,
+          y: 0,
+          width: w,
+          height: decoded.height,
+        );
       } else {
         // Too tall → trim top/bottom
         final int h = (decoded.width / ratio).toInt();
         final int y = (decoded.height - h) ~/ 2;
-        cropped = img.copyCrop(decoded, x: 0, y: y, width: decoded.width, height: h);
+        cropped = img.copyCrop(
+          decoded,
+          x: 0,
+          y: y,
+          width: decoded.width,
+          height: h,
+        );
       }
 
-      final dir  = await getTemporaryDirectory();
-      final path = '${dir.path}/post_${ratio.toStringAsFixed(2)}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final file = File(path)..writeAsBytesSync(img.encodeJpg(cropped, quality: 90));
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/post_${ratio.toStringAsFixed(2)}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final file = File(path)
+        ..writeAsBytesSync(img.encodeJpg(cropped, quality: 90));
       if (mounted) setState(() => _displayFile = file);
     } catch (e) {
       debugPrint('Crop error: $e');
@@ -135,9 +172,13 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
 
   // ── Submit ───────────────────────────────────────────────────────────────
   Future<void> _submitPost() async {
-    if (_titleController.text.trim().isEmpty) {
+    final title = _titleController.text.trim();
+    final description = _descController.text.trim();
+    final uploadFile = _displayFile ?? _rawFile;
+
+    if (title.isEmpty && description.isEmpty && uploadFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add a headline')),
+        const SnackBar(content: Text('Add text or media before posting')),
       );
       return;
     }
@@ -145,27 +186,28 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
     setState(() => _isPosting = true);
 
     try {
-      final prefs  = await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance();
       final mobile = prefs.getString('user_phone') ?? '';
 
       final req = http.MultipartRequest(
         'POST',
         Uri.parse('https://team.cropsync.in/cine_circle/social_api.php'),
       );
-      req.fields['action']       = 'create_post';
+      req.fields['action'] = 'create_post';
       req.fields['mobile_number'] = mobile;
-      req.fields['category']     = _category;
-      req.fields['title']        = _titleController.text.trim();
-      req.fields['description']  = _descController.text.trim();
-      req.fields['media_type']   = _mediaType;
+      req.fields['category'] = _category;
+      req.fields['title'] = title;
+      req.fields['description'] = description;
+      req.fields['media_type'] = _mediaType;
 
-      final uploadFile = _displayFile ?? _rawFile;
       if (uploadFile != null) {
-        req.files.add(await http.MultipartFile.fromPath('media', uploadFile.path));
+        req.files.add(
+          await http.MultipartFile.fromPath('media', uploadFile.path),
+        );
       }
 
-      final streamed  = await req.send();
-      final response  = await http.Response.fromStream(streamed);
+      final streamed = await req.send();
+      final response = await http.Response.fromStream(streamed);
 
       if (!mounted) return;
 
@@ -174,15 +216,21 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Row(children: [
-              Icon(Icons.stars_rounded, color: Colors.amber, size: 20),
-              SizedBox(width: 10),
-              Text('Posted! You earned 10 CineCredits 🎬',
-                  style: TextStyle(fontFamily: 'Google Sans')),
-            ]),
+            content: const Row(
+              children: [
+                Icon(Icons.stars_rounded, color: Colors.amber, size: 20),
+                SizedBox(width: 10),
+                Text(
+                  'Posted! You earned 10 CineCredits 🎬',
+                  style: TextStyle(fontFamily: 'Google Sans'),
+                ),
+              ],
+            ),
             backgroundColor: Colors.black,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
         Navigator.pop(context, true);
@@ -193,7 +241,9 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _isPosting = false);
@@ -237,7 +287,8 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
               // ── Drag handle ──
               Center(
                 child: Container(
-                  width: 36, height: 4,
+                  width: 36,
+                  height: 4,
                   decoration: BoxDecoration(
                     color: Colors.grey.shade300,
                     borderRadius: BorderRadius.circular(2),
@@ -289,7 +340,10 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                       onTap: () => setState(() => _category = _categories[i]),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: sel ? Colors.black : Colors.white,
                           borderRadius: BorderRadius.circular(20),
@@ -333,7 +387,10 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                   ),
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(color: Colors.grey.shade300),
@@ -344,7 +401,10 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Colors.black, width: 1.5),
+                    borderSide: const BorderSide(
+                      color: Colors.black,
+                      width: 1.5,
+                    ),
                   ),
                 ),
               ),
@@ -367,7 +427,10 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                   hintStyle: TextStyle(color: Colors.grey.shade400),
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(color: Colors.grey.shade300),
@@ -378,7 +441,10 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Colors.black, width: 1.5),
+                    borderSide: const BorderSide(
+                      color: Colors.black,
+                      width: 1.5,
+                    ),
                   ),
                 ),
               ),
@@ -390,23 +456,29 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
 
               if (_rawFile == null) ...[
                 // Media pickers
-                Row(children: [
-                  Expanded(child: _mediaTile(
-                    icon: Icons.image_rounded,
-                    label: 'Photo',
-                    color: const Color(0xFFEEF4FF),
-                    iconColor: const Color(0xFF3B82F6),
-                    onTap: () => _pickMedia(false),
-                  )),
-                  const SizedBox(width: 12),
-                  Expanded(child: _mediaTile(
-                    icon: Icons.videocam_rounded,
-                    label: 'Video',
-                    color: const Color(0xFFF5F0FF),
-                    iconColor: const Color(0xFF8B5CF6),
-                    onTap: () => _pickMedia(true),
-                  )),
-                ]),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _mediaTile(
+                        icon: Icons.image_rounded,
+                        label: 'Photo',
+                        color: const Color(0xFFEEF4FF),
+                        iconColor: const Color(0xFF3B82F6),
+                        onTap: () => _pickMedia(false),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _mediaTile(
+                        icon: Icons.videocam_rounded,
+                        label: 'Video',
+                        color: const Color(0xFFF5F0FF),
+                        iconColor: const Color(0xFF8B5CF6),
+                        onTap: () => _pickMedia(true),
+                      ),
+                    ),
+                  ],
+                ),
               ] else ...[
                 // Media preview + controls
                 ClipRRect(
@@ -416,7 +488,8 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                       // Preview
                       if (_mediaType == 'image' && _displayFile != null)
                         AspectRatio(
-                          aspectRatio: _aspectOptions[_selectedRatioIndex].ratio ?? 1.0,
+                          aspectRatio:
+                              _aspectOptions[_selectedRatioIndex].ratio ?? 1.0,
                           child: Image.file(
                             _displayFile!,
                             fit: BoxFit.cover,
@@ -429,13 +502,18 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                           width: double.infinity,
                           color: Colors.black12,
                           child: const Center(
-                            child: Icon(Icons.videocam_rounded, size: 64, color: Colors.black38),
+                            child: Icon(
+                              Icons.videocam_rounded,
+                              size: 64,
+                              color: Colors.black38,
+                            ),
                           ),
                         ),
 
                       // Top-right close
                       Positioned(
-                        top: 10, right: 10,
+                        top: 10,
+                        right: 10,
                         child: GestureDetector(
                           onTap: () => setState(() {
                             _rawFile = _displayFile = null;
@@ -446,16 +524,24 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                               color: Colors.black54,
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.close, color: Colors.white, size: 18),
+                            child: const Icon(
+                              Icons.close,
+                              color: Colors.white,
+                              size: 18,
+                            ),
                           ),
                         ),
                       ),
 
                       // Top-left media type badge
                       Positioned(
-                        top: 10, left: 10,
+                        top: 10,
+                        left: 10,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black54,
                             borderRadius: BorderRadius.circular(12),
@@ -489,13 +575,17 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                           onTap: () => _onRatioSelected(i),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
-                            margin: EdgeInsets.only(right: i < _aspectOptions.length - 1 ? 8 : 0),
+                            margin: EdgeInsets.only(
+                              right: i < _aspectOptions.length - 1 ? 8 : 0,
+                            ),
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
                               color: sel ? Colors.black : Colors.white,
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: sel ? Colors.black : Colors.grey.shade300,
+                                color: sel
+                                    ? Colors.black
+                                    : Colors.grey.shade300,
                                 width: 1.5,
                               ),
                             ),
@@ -505,7 +595,9 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                                 Icon(
                                   opt.icon,
                                   size: 20,
-                                  color: sel ? Colors.white : Colors.grey.shade600,
+                                  color: sel
+                                      ? Colors.white
+                                      : Colors.grey.shade600,
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
@@ -522,7 +614,9 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                                   style: TextStyle(
                                     fontFamily: 'Google Sans',
                                     fontSize: 10,
-                                    color: sel ? Colors.white70 : Colors.grey.shade500,
+                                    color: sel
+                                        ? Colors.white70
+                                        : Colors.grey.shade500,
                                   ),
                                 ),
                               ],
@@ -553,12 +647,16 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                   ),
                   child: _isPosting
                       ? const SizedBox(
-                          width: 22, height: 22,
+                          width: 22,
+                          height: 22,
                           child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2.5))
-                      : Row(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
+                          children: [
                             Icon(Icons.send_rounded, size: 20),
                             SizedBox(width: 10),
                             Text(

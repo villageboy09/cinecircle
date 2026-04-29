@@ -1,4 +1,7 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
@@ -18,20 +21,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final TextEditingController _cityController = TextEditingController();
   final TextEditingController _roleController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
-  
+
   bool _isLoading = false;
   File? _imageFile;
   String? _existingImageUrl;
 
+  bool _isValidName(String value) {
+    return RegExp(r"^[A-Za-z][A-Za-z .'-]{1,59}$").hasMatch(value.trim());
+  }
+
+  bool _isValidCity(String value) {
+    return RegExp(
+      r"^[A-Za-z0-9][A-Za-z0-9 .,'-]{1,79}$",
+    ).hasMatch(value.trim());
+  }
+
   Future<void> _pickAndUploadImage() async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    
+
     if (pickedFile != null) {
       setState(() {
         _imageFile = File(pickedFile.path);
       });
-      
+
       final prefs = await SharedPreferences.getInstance();
       final mobile = prefs.getString('user_phone') ?? '';
       if (mobile.isEmpty) return;
@@ -39,20 +52,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       setState(() => _isLoading = true);
 
       var request = http.MultipartRequest(
-        'POST', 
-        Uri.parse('https://team.cropsync.in/cine_circle/cinecircle_api.php')
+        'POST',
+        Uri.parse('https://team.cropsync.in/cine_circle/cinecircle_api.php'),
       );
       request.fields['action'] = 'upload_profile_image';
       request.fields['mobile_number'] = mobile;
-      request.files.add(await http.MultipartFile.fromPath('image', pickedFile.path));
+      request.files.add(
+        await http.MultipartFile.fromPath('image', pickedFile.path),
+      );
 
       try {
         var streamedResponse = await request.send();
         if (streamedResponse.statusCode == 200) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile image uploaded!')));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Profile image uploaded!')),
+            );
+          }
         }
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+        }
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -71,7 +94,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     setState(() {
       _nameController.text = prefs.getString('user_name') ?? '';
-      _roleController.text = prefs.getString('account_type') ?? 'Aspiring Actor';
+      _roleController.text =
+          prefs.getString('account_type') ?? 'Aspiring Actor';
     });
 
     if (mobile.isEmpty) return;
@@ -88,14 +112,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           final profile = data['profile'];
           if (mounted) {
             setState(() {
-              _nameController.text = profile['full_name'] ?? _nameController.text;
-              
-              if (profile['role_title'] != null && profile['role_title'].toString().isNotEmpty) {
-                 _roleController.text = profile['role_title'];
+              _nameController.text =
+                  profile['full_name'] ?? _nameController.text;
+
+              if (profile['role_title'] != null &&
+                  profile['role_title'].toString().isNotEmpty) {
+                _roleController.text = profile['role_title'];
               } else {
-                 _roleController.text = 'Aspiring Actor';
+                _roleController.text = 'Aspiring Actor';
               }
-              
+
               _cityController.text = profile['city'] ?? '';
               _bioController.text = profile['bio'] ?? '';
               _existingImageUrl = profile['profile_image_url'];
@@ -112,12 +138,31 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() {
       _isLoading = true;
     });
-    
+
     final prefs = await SharedPreferences.getInstance();
     final String mobile = prefs.getString('user_phone') ?? '';
 
     if (mobile.isEmpty) {
       setState(() => _isLoading = false);
+      return;
+    }
+
+    final name = _nameController.text.trim();
+    final city = _cityController.text.trim();
+
+    if (!_isValidName(name)) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid name using letters only.')),
+      );
+      return;
+    }
+
+    if (city.isNotEmpty && !_isValidCity(city)) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter a valid city name.')));
       return;
     }
 
@@ -127,28 +172,29 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         body: {
           'action': 'update_profile',
           'mobile_number': mobile,
-          'full_name': _nameController.text,
+          'full_name': name,
           'role_title': _roleController.text,
-          'city': _cityController.text,
+          'city': city,
           'bio': _bioController.text,
         },
       );
 
+      if (!mounted) return;
       if (response.statusCode == 200) {
-        await prefs.setString('user_name', _nameController.text);
+        await prefs.setString('user_name', name);
         await prefs.setString('account_type', _roleController.text);
-        if (mounted) {
-          Navigator.pop(context, true);
-        }
+        if (!mounted) return;
+        Navigator.pop(context, true);
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update profile')));
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update profile')),
+        );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -188,21 +234,34 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       decoration: BoxDecoration(
                         color: Colors.grey.shade200,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.grey.shade300, width: 2),
+                        border: Border.all(
+                          color: Colors.grey.shade300,
+                          width: 2,
+                        ),
                         image: _imageFile != null
                             ? DecorationImage(
                                 image: FileImage(_imageFile!),
                                 fit: BoxFit.cover,
                               )
-                            : (_existingImageUrl != null && _existingImageUrl!.isNotEmpty)
-                                ? DecorationImage(
-                                    image: CachedNetworkImageProvider(_existingImageUrl!),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
+                            : (_existingImageUrl != null &&
+                                  _existingImageUrl!.isNotEmpty)
+                            ? DecorationImage(
+                                image: CachedNetworkImageProvider(
+                                  _existingImageUrl!,
+                                ),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
                       ),
-                      child: (_imageFile == null && (_existingImageUrl == null || _existingImageUrl!.isEmpty))
-                          ? const Icon(Icons.person, size: 50, color: Colors.grey)
+                      child:
+                          (_imageFile == null &&
+                              (_existingImageUrl == null ||
+                                  _existingImageUrl!.isEmpty))
+                          ? const Icon(
+                              Icons.person,
+                              size: 50,
+                              color: Colors.grey,
+                            )
                           : null,
                     ),
                     Positioned(
@@ -214,7 +273,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           color: Colors.black,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
+                        child: const Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 16,
+                        ),
                       ),
                     ),
                   ],
@@ -228,7 +291,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             const SizedBox(height: 16),
             _buildTextField(label: 'City', controller: _cityController),
             const SizedBox(height: 16),
-            _buildTextField(label: 'Bio', controller: _bioController, maxLines: 4),
+            _buildTextField(
+              label: 'Bio',
+              controller: _bioController,
+              maxLines: 4,
+            ),
             const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,
@@ -245,9 +312,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
                 child: _isLoading
                     ? const SizedBox(
-                        height: 20, 
-                        width: 20, 
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
                     : const Text(
                         'Save Details',
                         style: TextStyle(
@@ -264,14 +335,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  Widget _buildTextField({required String label, required TextEditingController controller, int maxLines = 1}) {
+  Widget _buildTextField({
+    required String label,
+    required TextEditingController controller,
+    int maxLines = 1,
+  }) {
+    final List<TextInputFormatter>? formatters = label == 'Full Name'
+        ? [FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z .'-]"))]
+        : label == 'City'
+        ? [FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z0-9 .,'-]"))]
+        : null;
+
     return TextField(
       controller: controller,
       maxLines: maxLines,
-      style: const TextStyle(fontFamily: 'Google Sans', fontSize: 16, color: Colors.black),
+      inputFormatters: formatters,
+      style: const TextStyle(
+        fontFamily: 'Google Sans',
+        fontSize: 16,
+        color: Colors.black,
+      ),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: Colors.grey.shade600, fontFamily: 'Google Sans'),
+        labelStyle: TextStyle(
+          color: Colors.grey.shade600,
+          fontFamily: 'Google Sans',
+        ),
         alignLabelWithHint: maxLines > 1,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
