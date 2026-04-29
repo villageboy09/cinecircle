@@ -2,7 +2,10 @@
 
 require_once __DIR__ . '/../config.php';
 
+date_default_timezone_set('Asia/Kolkata');
+
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec("SET time_zone = '+05:30'");
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
@@ -766,7 +769,7 @@ try {
                 exit();
             }
 
-            $stmt = $pdo->prepare("SELECT user_id, created_at FROM feed_posts WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT user_id, created_at, TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age_minutes FROM feed_posts WHERE id = ?");
             $stmt->execute([$postId]);
             $post = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -780,9 +783,7 @@ try {
                 exit();
             }
 
-            $createdAt = new DateTime($post['created_at']);
-            $diff = (new DateTime())->diff($createdAt);
-            $ageMinutes = $diff->days * 24 * 60 + $diff->h * 60 + $diff->i;
+            $ageMinutes = (int)($post['age_minutes'] ?? 9999);
             if ($ageMinutes > 15) {
                 echo json_encode(["status" => "error", "message" => "Editing is allowed only within 15 minutes of posting"]);
                 exit();
@@ -967,6 +968,55 @@ try {
             "status"  => "success",
             "data"    => $items,
             "balance" => $balRow ? (int)$balRow['current_balance'] : 0
+        ]);
+    }
+
+    // --- HOME SEARCH ---
+    elseif ($action === 'search_home') {
+        $query = trim($_GET['query'] ?? ($_POST['query'] ?? ''));
+        if ($query === '') {
+            echo json_encode(["status" => "success", "data" => ["users" => [], "posts" => []]]);
+            exit();
+        }
+
+        $like = '%' . $query . '%';
+
+        $userStmt = $pdo->prepare("
+            SELECT u.id, u.full_name, u.role_title, u.profile_image_url, u.city,
+                   EXISTS(SELECT 1 FROM user_follows WHERE follower_id = ? AND following_id = u.id) AS is_following
+            FROM cinecircle u
+            WHERE u.full_name LIKE ? OR u.role_title LIKE ? OR u.city LIKE ?
+            ORDER BY u.full_name ASC
+            LIMIT 25
+        ");
+        $userStmt->execute([$myId, $like, $like, $like]);
+        $users = $userStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($users as &$u) $u['is_following'] = (bool)$u['is_following'];
+
+        $postStmt = $pdo->prepare("
+            SELECT p.id, p.user_id, p.category, p.title, p.description, p.media_url, p.media_type, p.created_at,
+                   u.full_name AS author_name, u.role_title, u.profile_image_url,
+                   (SELECT COUNT(*) FROM feed_likes WHERE post_id = p.id) AS likes_count,
+                   (SELECT COUNT(*) FROM feed_comments WHERE post_id = p.id) AS comments_count,
+                   (SELECT COUNT(*) FROM feed_views WHERE post_id = p.id) AS views_count,
+                   EXISTS(SELECT 1 FROM feed_likes WHERE post_id = p.id AND user_id = ?) AS is_liked,
+                   EXISTS(SELECT 1 FROM feed_saves WHERE post_id = p.id AND user_id = ?) AS is_saved
+            FROM feed_posts p
+            JOIN cinecircle u ON p.user_id = u.id
+            WHERE p.title LIKE ? OR p.description LIKE ?
+            ORDER BY p.created_at DESC
+            LIMIT 25
+        ");
+        $postStmt->execute([$myId, $myId, $like, $like]);
+        $posts = $postStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            "status" => "success",
+            "data" => [
+                "current_user_id" => $myId,
+                "users" => $users,
+                "posts" => $posts,
+            ],
         ]);
     }
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'public_profile_screen.dart';
+import 'global_notifier.dart';
 
 const _socialApi = 'https://team.cropsync.in/cine_circle/social_api.php';
 
@@ -11,7 +12,7 @@ const _socialApi = 'https://team.cropsync.in/cine_circle/social_api.php';
 class FollowersScreen extends StatefulWidget {
   final String targetUserId;
   final String displayName; // e.g. "Arjun"
-  final int initialTab;     // 0 = Followers, 1 = Following
+  final int initialTab; // 0 = Followers, 1 = Following
 
   const FollowersScreen({
     super.key,
@@ -86,14 +87,8 @@ class _FollowersScreenState extends State<FollowersScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          _UserListTab(
-            targetUserId: widget.targetUserId,
-            mode: 'followers',
-          ),
-          _UserListTab(
-            targetUserId: widget.targetUserId,
-            mode: 'following',
-          ),
+          _UserListTab(targetUserId: widget.targetUserId, mode: 'followers'),
+          _UserListTab(targetUserId: widget.targetUserId, mode: 'following'),
         ],
       ),
     );
@@ -107,10 +102,7 @@ class _UserListTab extends StatefulWidget {
   final String targetUserId;
   final String mode; // 'followers' | 'following'
 
-  const _UserListTab({
-    required this.targetUserId,
-    required this.mode,
-  });
+  const _UserListTab({required this.targetUserId, required this.mode});
 
   @override
   State<_UserListTab> createState() => _UserListTabState();
@@ -124,7 +116,7 @@ class _UserListTabState extends State<_UserListTab>
   bool _hasMore = true;
   int _page = 1;
   String? _myMobile;
-  String? _myUserId;   // ← logged-in user's ID to hide self follow button
+  String? _myUserId; // ← logged-in user's ID to hide self follow button
   late ScrollController _scrollCtrl;
 
   @override
@@ -161,8 +153,9 @@ class _UserListTabState extends State<_UserListTab>
   Future<void> _fetchPage(int page) async {
     if (page == 1) setState(() => _isLoading = true);
     try {
-      final action =
-          widget.mode == 'followers' ? 'get_followers' : 'get_following';
+      final action = widget.mode == 'followers'
+          ? 'get_followers'
+          : 'get_following';
       final uri = Uri.parse(
         '$_socialApi?action=$action'
         '&mobile_number=${Uri.encodeComponent(_myMobile ?? '')}'
@@ -205,41 +198,43 @@ class _UserListTabState extends State<_UserListTab>
   Future<void> _toggleFollow(int index) async {
     final user = _users[index];
     final wasFollowing = user['is_following'] == true;
+    final targetId = user['id'].toString();
 
     setState(() {
       _users[index] = {...user, 'is_following': !wasFollowing};
     });
 
     try {
-      final res = await http.post(Uri.parse(_socialApi), body: {
-        'action': 'toggle_follow',
-        'mobile_number': _myMobile ?? '',
-        'target_user_id': user['id'].toString(),
-      });
+      final res = await http.post(
+        Uri.parse(_socialApi),
+        body: {
+          'action': 'toggle_follow',
+          'mobile_number': _myMobile ?? '',
+          'target_user_id': user['id'].toString(),
+        },
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['status'] == 'success' && mounted) {
+          final next = data['is_following'] == true;
           setState(() {
-            _users[index] = {
-              ..._users[index],
-              'is_following': data['is_following'] == true,
-            };
+            _users[index] = {..._users[index], 'is_following': next};
           });
+          GlobalNotifier.instance.updateFollowState(targetId, next);
+          if (next != wasFollowing) {
+            GlobalNotifier.instance.adjustFollowing(next ? 1 : -1);
+          }
         } else {
           if (mounted) {
-            setState(() => _users[index] = {
-              ...user,
-              'is_following': wasFollowing,
-            });
+            setState(
+              () => _users[index] = {...user, 'is_following': wasFollowing},
+            );
           }
         }
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _users[index] = {
-          ...user,
-          'is_following': wasFollowing,
-        });
+        setState(() => _users[index] = {...user, 'is_following': wasFollowing});
       }
     }
   }
@@ -333,8 +328,8 @@ class _UserListTabState extends State<_UserListTab>
     final String city = u['city'] ?? '';
     final String? imageUrl =
         (u['profile_image_url']?.toString() ?? '').isNotEmpty
-            ? u['profile_image_url'].toString()
-            : null;
+        ? u['profile_image_url'].toString()
+        : null;
     final bool isFollowing = u['is_following'] == true;
     final bool followsMe = u['follows_you'] == true;
 
@@ -357,8 +352,7 @@ class _UserListTabState extends State<_UserListTab>
             CircleAvatar(
               radius: 26,
               backgroundColor: Colors.grey.shade200,
-              backgroundImage:
-                  imageUrl != null ? NetworkImage(imageUrl) : null,
+              backgroundImage: imageUrl != null ? NetworkImage(imageUrl) : null,
               child: imageUrl == null
                   ? Icon(Icons.person, size: 28, color: Colors.grey.shade500)
                   : null,
@@ -388,7 +382,9 @@ class _UserListTabState extends State<_UserListTab>
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.grey.shade100,
                             borderRadius: BorderRadius.circular(20),
@@ -419,8 +415,11 @@ class _UserListTabState extends State<_UserListTab>
                   if (city.isNotEmpty)
                     Row(
                       children: [
-                        Icon(Icons.location_on_outlined,
-                            size: 12, color: Colors.grey.shade400),
+                        Icon(
+                          Icons.location_on_outlined,
+                          size: 12,
+                          color: Colors.grey.shade400,
+                        ),
                         const SizedBox(width: 2),
                         Text(
                           city,
@@ -443,13 +442,14 @@ class _UserListTabState extends State<_UserListTab>
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 220),
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 8),
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: isFollowing ? Colors.white : Colors.black,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color:
-                          isFollowing ? Colors.grey.shade300 : Colors.black,
+                      color: isFollowing ? Colors.grey.shade300 : Colors.black,
                     ),
                   ),
                   child: Text(

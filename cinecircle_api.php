@@ -2,8 +2,11 @@
 
 require_once __DIR__ . '/../config.php';
 
+date_default_timezone_set('Asia/Kolkata');
+
 // Enable PDO exceptions
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec("SET time_zone = '+05:30'");
 
 // Headers
 header("Access-Control-Allow-Origin: *");
@@ -136,6 +139,44 @@ if ($action === 'signup') {
             http_response_code(401);
             echo json_encode(["status" => "error", "message" => "Invalid mobile number or password."]);
         }
+    } catch (PDOException $e) {
+        http_response_code(500);
+        echo json_encode(["status" => "error", "message" => "Server error"]);
+    }
+
+} elseif ($action === 'reset_password') {
+
+    $mobile = trim($_POST['mobile_number'] ?? '');
+    $newPassword = $_POST['new_password'] ?? '';
+
+    if (!$mobile || !$newPassword) {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "Mobile number and new password are required."]);
+        exit();
+    }
+
+    if (!preg_match('/^[0-9]{10,15}$/', $mobile)) {
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "Invalid mobile number."]);
+        exit();
+    }
+
+    try {
+        $stmt = $pdo->prepare("SELECT id FROM cinecircle WHERE mobile_number = ? LIMIT 1");
+        $stmt->execute([$mobile]);
+        $userId = $stmt->fetchColumn();
+
+        if (!$userId) {
+            http_response_code(404);
+            echo json_encode(["status" => "error", "message" => "User not found"]);
+            exit();
+        }
+
+        $passwordHashed = password_hash($newPassword, PASSWORD_BCRYPT);
+        $update = $pdo->prepare("UPDATE cinecircle SET password = ? WHERE mobile_number = ?");
+        $update->execute([$passwordHashed, $mobile]);
+
+        echo json_encode(["status" => "success", "message" => "Password reset successful"]);
     } catch (PDOException $e) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "Server error"]);

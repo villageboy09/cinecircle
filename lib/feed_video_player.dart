@@ -11,20 +11,36 @@ class FeedVideoPlayer extends StatefulWidget {
   State<FeedVideoPlayer> createState() => _FeedVideoPlayerState();
 }
 
-class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
+class _FeedVideoPlayerState extends State<FeedVideoPlayer>
+    with AutomaticKeepAliveClientMixin {
   late VideoPlayerController _controller;
   late Future<void> _initializeVideoPlayerFuture;
   bool _isPlaying = false;
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+    _setupController(widget.videoUrl);
+  }
+
+  @override
+  void didUpdateWidget(covariant FeedVideoPlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoUrl != widget.videoUrl) {
+      _controller.dispose();
+      _setupController(widget.videoUrl);
+    }
+  }
+
+  void _setupController(String url) {
+    _isPlaying = false;
+    _controller = VideoPlayerController.networkUrl(Uri.parse(url));
     _initializeVideoPlayerFuture = _controller.initialize().then((_) {
-      // Ensure the first frame is shown
       if (mounted) setState(() {});
     });
-
     _controller.addListener(() {
       if (_controller.value.isPlaying != _isPlaying) {
         if (mounted) setState(() => _isPlaying = _controller.value.isPlaying);
@@ -50,6 +66,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return FutureBuilder(
       future: _initializeVideoPlayerFuture,
       builder: (context, snapshot) {
@@ -69,7 +86,11 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                         shape: BoxShape.circle,
                       ),
                       padding: const EdgeInsets.all(12),
-                      child: const Icon(Icons.play_arrow, color: Colors.white, size: 48),
+                      child: const Icon(
+                        Icons.play_arrow,
+                        color: Colors.white,
+                        size: 48,
+                      ),
                     ),
                   if (_controller.value.isBuffering)
                     const CircularProgressIndicator(color: Colors.white),
@@ -83,7 +104,12 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
             aspectRatio: 16 / 9, // Default fallback before init
             child: Container(
               color: Colors.grey.shade100,
-              child: const Center(child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2)),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  color: Colors.black,
+                  strokeWidth: 2,
+                ),
+              ),
             ),
           );
         }

@@ -388,98 +388,230 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                // Credits chip + Stats
-                GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const SocialCineCreditsScreen(),
-                      ),
-                    );
-                  },
-                  child: _buildCreditsIsland(),
-                ),
-                const SizedBox(height: 16),
+                // Stats + Credits
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
+                    Expanded(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          GestureDetector(
+                            onTap: () {
+                              if (_profileData?['id'] == null) return;
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => FollowersScreen(
+                                    targetUserId: _profileData!['id']
+                                        .toString(),
+                                    displayName: _userName,
+                                    initialTab: 0,
+                                  ),
+                                ),
+                              ).then((_) => _loadFollowCounts(_userPhone));
+                            },
+                            child: ValueListenableBuilder<int>(
+                              valueListenable:
+                                  GlobalNotifier.instance.followersCount,
+                              builder: (context, value, _) => _buildStat(
+                                '$value',
+                                'Followers',
+                                Icons.people_outline,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            height: 40,
+                            width: 1,
+                            color: Colors.grey.shade300,
+                          ),
+                          GestureDetector(
+                            onTap: () {
+                              if (_profileData?['id'] == null) return;
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => FollowersScreen(
+                                    targetUserId: _profileData!['id']
+                                        .toString(),
+                                    displayName: _userName,
+                                    initialTab: 1,
+                                  ),
+                                ),
+                              ).then((_) => _loadFollowCounts(_userPhone));
+                            },
+                            child: ValueListenableBuilder<int>(
+                              valueListenable:
+                                  GlobalNotifier.instance.followingCount,
+                              builder: (context, value, _) => _buildStat(
+                                '$value',
+                                'Following',
+                                Icons.person_outline,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     GestureDetector(
                       onTap: () {
-                        if (_profileData?['id'] == null) return;
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => FollowersScreen(
-                              targetUserId: _profileData!['id'].toString(),
-                              displayName: _userName,
-                              initialTab: 0,
-                            ),
+                            builder: (context) =>
+                                const SocialCineCreditsScreen(),
                           ),
-                        ).then((_) => _loadFollowCounts(_userPhone));
+                        );
                       },
-                      child: ValueListenableBuilder<int>(
-                        valueListenable: GlobalNotifier.instance.followersCount,
-                        builder: (context, value, _) => _buildStat(
-                          '$value',
-                          'Followers',
-                          Icons.people_outline,
+                      child: _buildCreditsIsland(compact: true),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'About',
+                              style: TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _profileData?['bio']?.isNotEmpty == true
+                                  ? _profileData!['bio']!
+                                  : 'Write a bit about yourself and your journey.',
+                              maxLines: 5,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontSize: 13,
+                                color: Colors.black87,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    Container(
-                      height: 40,
-                      width: 1,
-                      color: Colors.grey.shade300,
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        if (_profileData?['id'] == null) return;
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => FollowersScreen(
-                              targetUserId: _profileData!['id'].toString(),
-                              displayName: _userName,
-                              initialTab: 1,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Posts & Saved',
+                              style: TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                        ).then((_) => _loadFollowCounts(_userPhone));
-                      },
-                      child: ValueListenableBuilder<int>(
-                        valueListenable: GlobalNotifier.instance.followingCount,
-                        builder: (context, value, _) => _buildStat(
-                          '$value',
-                          'Following',
-                          Icons.person_outline,
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.grid_on_outlined,
+                                  size: 16,
+                                  color: Colors.black87,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _isPostsLoading
+                                      ? '...'
+                                      : '${_postsList.length} Posts',
+                                  style: const TextStyle(
+                                    fontFamily: 'Google Sans',
+                                    fontSize: 13,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.bookmark_border,
+                                  size: 16,
+                                  color: Colors.black87,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _isSavedPostsLoading
+                                      ? '...'
+                                      : '${_savedPostsList.length} Saved',
+                                  style: const TextStyle(
+                                    fontFamily: 'Google Sans',
+                                    fontSize: 13,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                Divider(color: Colors.grey.shade200),
-                const SizedBox(height: 16),
-                // About
-                const Text(
-                  'About',
-                  style: TextStyle(
-                    fontFamily: 'Google Sans',
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _profileData?['bio']?.isNotEmpty == true
-                      ? _profileData!['bio']!
-                      : 'Write a bit about yourself and your journey.',
-                  style: const TextStyle(
-                    fontFamily: 'Google Sans',
-                    fontSize: 15,
-                    color: Colors.black87,
-                    height: 1.5,
+                DefaultTabController(
+                  length: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TabBar(
+                        labelColor: Colors.black,
+                        unselectedLabelColor: Colors.grey.shade500,
+                        indicatorColor: Colors.black,
+                        tabs: const [
+                          Tab(text: 'Posts'),
+                          Tab(text: 'Saved'),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 420,
+                        child: TabBarView(
+                          children: [
+                            _buildPostGrid(
+                              posts: _postsList,
+                              isLoading: _isPostsLoading,
+                              emptyText:
+                                  'No posts yet. Your posts will appear here.',
+                            ),
+                            _buildPostGrid(
+                              posts: _savedPostsList,
+                              isLoading: _isSavedPostsLoading,
+                              emptyText: 'No saved posts yet.',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -603,44 +735,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             .map((s) => _buildSkillChip(s['skill_name'] ?? ''))
                             .toList(),
                       ),
-                const SizedBox(height: 24),
-                DefaultTabController(
-                  length: 2,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TabBar(
-                        labelColor: Colors.black,
-                        unselectedLabelColor: Colors.grey.shade500,
-                        indicatorColor: Colors.black,
-                        tabs: const [
-                          Tab(text: 'Posts'),
-                          Tab(text: 'Saved'),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        height: 420,
-                        child: TabBarView(
-                          children: [
-                            _buildPostGrid(
-                              posts: _postsList,
-                              isLoading: _isPostsLoading,
-                              emptyText:
-                                  'No posts yet. Your posts will appear here.',
-                            ),
-                            _buildPostGrid(
-                              posts: _savedPostsList,
-                              isLoading: _isSavedPostsLoading,
-                              emptyText: 'No saved posts yet.',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
                 const SizedBox(height: 32),
                 SizedBox(
                   width: double.infinity,
@@ -1121,12 +1215,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildCreditsIsland() {
+  Widget _buildCreditsIsland({bool compact = false}) {
     return ValueListenableBuilder<int>(
       valueListenable: GlobalNotifier.instance.creditsBalance,
       builder: (context, value, _) {
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 12 : 18,
+            vertical: compact ? 8 : 10,
+          ),
           decoration: BoxDecoration(
             color: Colors.black,
             borderRadius: BorderRadius.circular(999),
@@ -1147,26 +1244,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color: Colors.amber.shade700,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.stars_rounded,
-                  size: 16,
+                  size: compact ? 14 : 16,
                   color: Colors.black,
                 ),
               ),
               const SizedBox(width: 10),
               Text(
                 '$value CineCredits',
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'Google Sans',
-                  fontSize: 14,
+                  fontSize: compact ? 12 : 14,
                   fontWeight: FontWeight.w700,
                   color: Colors.white,
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(
+              Icon(
                 Icons.arrow_forward_ios,
-                size: 12,
+                size: compact ? 10 : 12,
                 color: Colors.white70,
               ),
             ],

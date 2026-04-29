@@ -2,8 +2,11 @@
 
 require_once __DIR__ . '/../config.php';
 
+date_default_timezone_set('Asia/Kolkata');
+
 // Enable PDO exceptions
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec("SET time_zone = '+05:30'");
 
 // Headers
 header("Access-Control-Allow-Origin: *");

@@ -27,13 +27,40 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _existingImageUrl;
 
   bool _isValidName(String value) {
-    return RegExp(r"^[A-Za-z][A-Za-z .'-]{1,59}$").hasMatch(value.trim());
+    return RegExp(r"^[A-Za-z][A-Za-z .'-]{0,49}$").hasMatch(value.trim());
   }
 
   bool _isValidCity(String value) {
     return RegExp(
-      r"^[A-Za-z0-9][A-Za-z0-9 .,'-]{1,79}$",
+      r"^[A-Za-z0-9][A-Za-z0-9 .,'-]{0,29}$",
     ).hasMatch(value.trim());
+  }
+
+  bool _isValidBio(String value) {
+    if (value.trim().isEmpty) return true;
+    return RegExp(
+      r"^[A-Za-z0-9][A-Za-z0-9 .,'\n-]{0,249}$",
+    ).hasMatch(value.trim());
+  }
+
+  bool _isFetchingCity = false;
+
+  Future<void> _autoFillCity() async {
+    if (_isFetchingCity) return;
+    setState(() => _isFetchingCity = true);
+    try {
+      final response = await http.get(Uri.parse('https://ipapi.co/json/'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final city = (data['city'] ?? '').toString().trim();
+        if (city.isNotEmpty && mounted) {
+          setState(() => _cityController.text = city);
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isFetchingCity = false);
+    }
   }
 
   Future<void> _pickAndUploadImage() async {
@@ -149,6 +176,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     final name = _nameController.text.trim();
     final city = _cityController.text.trim();
+    final bio = _bioController.text.trim();
 
     if (!_isValidName(name)) {
       setState(() => _isLoading = false);
@@ -166,6 +194,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return;
     }
 
+    if (!_isValidBio(bio)) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bio can use letters, numbers, and basic punctuation.'),
+        ),
+      );
+      return;
+    }
+
     try {
       final response = await http.post(
         Uri.parse('https://team.cropsync.in/cine_circle/cinecircle_api.php'),
@@ -175,7 +213,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           'full_name': name,
           'role_title': _roleController.text,
           'city': city,
-          'bio': _bioController.text,
+          'bio': bio,
         },
       );
 
@@ -285,11 +323,29 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
             ),
             const SizedBox(height: 32),
-            _buildTextField(label: 'Full Name', controller: _nameController),
+            _buildTextField(
+              label: 'Full Name',
+              controller: _nameController,
+              maxLength: 50,
+            ),
             const SizedBox(height: 16),
             _buildTextField(label: 'Role Title', controller: _roleController),
             const SizedBox(height: 16),
-            _buildTextField(label: 'City', controller: _cityController),
+            _buildTextField(
+              label: 'City',
+              controller: _cityController,
+              maxLength: 30,
+              suffixIcon: IconButton(
+                onPressed: _isFetchingCity ? null : _autoFillCity,
+                icon: _isFetchingCity
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location),
+              ),
+            ),
             const SizedBox(height: 16),
             _buildTextField(
               label: 'Bio',
@@ -341,11 +397,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required TextEditingController controller,
     int maxLines = 1,
     int? maxLength,
+    Widget? suffixIcon,
   }) {
     final List<TextInputFormatter>? formatters = label == 'Full Name'
         ? [FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z .'-]"))]
         : label == 'City'
         ? [FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z0-9 .,'-]"))]
+        : label == 'Bio'
+        ? [FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z0-9 .,'\n-]"))]
         : null;
 
     return TextField(
@@ -377,6 +436,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Colors.black),
         ),
+        suffixIcon: suffixIcon,
       ),
     );
   }

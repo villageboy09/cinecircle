@@ -25,11 +25,20 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   Map<String, dynamic>? _profile;
   bool _isFollowing = false;
   bool _isTogglingFollow = false;
+  String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentUserId();
     _fetchProfile();
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() => _currentUserId = prefs.getString('user_id'));
+    }
   }
 
   Future<String> _getMobile() async {
@@ -166,6 +175,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     final List skills = p['skills'] ?? [];
     final List credits = p['credits'] ?? [];
     final List reels = p['reels'] ?? [];
+    final bool isSelf =
+        _currentUserId != null && _currentUserId == widget.userId;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -271,79 +282,85 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          // — Action Buttons —
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: _isTogglingFollow ? null : _toggleFollow,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: _isFollowing ? Colors.white : Colors.black,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: _isFollowing
-                            ? Colors.grey.shade300
-                            : Colors.black,
+          if (!isSelf) ...[
+            // — Action Buttons —
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _isTogglingFollow ? null : _toggleFollow,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: _isFollowing ? Colors.white : Colors.black,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _isFollowing
+                              ? Colors.grey.shade300
+                              : Colors.black,
+                        ),
                       ),
-                    ),
-                    alignment: Alignment.center,
-                    child: _isTogglingFollow
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: _isFollowing ? Colors.black : Colors.white,
+                      alignment: Alignment.center,
+                      child: _isTogglingFollow
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: _isFollowing
+                                    ? Colors.black
+                                    : Colors.white,
+                              ),
+                            )
+                          : Text(
+                              _isFollowing ? 'Following ✓' : 'Follow',
+                              style: TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                color: _isFollowing
+                                    ? Colors.black
+                                    : Colors.white,
+                              ),
                             ),
-                          )
-                        : Text(
-                            _isFollowing ? 'Following ✓' : 'Follow',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _openChat,
+                    child: Container(
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.chat_bubble_outline, size: 16),
+                          SizedBox(width: 6),
+                          Text(
+                            'Message',
                             style: TextStyle(
                               fontFamily: 'Google Sans',
                               fontWeight: FontWeight.w600,
                               fontSize: 15,
-                              color: _isFollowing ? Colors.black : Colors.white,
                             ),
                           ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: GestureDetector(
-                  onTap: _openChat,
-                  child: Container(
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.chat_bubble_outline, size: 16),
-                        SizedBox(width: 6),
-                        Text(
-                          'Message',
-                          style: TextStyle(
-                            fontFamily: 'Google Sans',
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
+              ],
+            ),
+            const SizedBox(height: 24),
+          ],
           // — Stats —
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,

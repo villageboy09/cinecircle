@@ -2,7 +2,10 @@
 
 require_once __DIR__ . '/../config.php';
 
+date_default_timezone_set('Asia/Kolkata');
+
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec("SET time_zone = '+05:30'");
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
@@ -163,12 +166,32 @@ try {
             FROM feed_views v
             JOIN cinecircle u ON v.user_id = u.id
             WHERE v.post_id = ?
-            ORDER BY v.id DESC
+            ORDER BY v.viewed_at DESC
         ");
         $stmt->execute([$postId]);
         $viewers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         echo json_encode(["status" => "success", "data" => $viewers]);
+    }
+    elseif ($action === 'get_post_likes') {
+        $postId = $_GET['post_id'] ?? '';
+        if (!$postId) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "post_id required"]);
+            exit();
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT u.id, u.full_name, u.profile_image_url, u.city
+            FROM feed_likes l
+            JOIN cinecircle u ON l.user_id = u.id
+            WHERE l.post_id = ?
+            ORDER BY u.full_name ASC
+        ");
+        $stmt->execute([$postId]);
+        $likes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode(["status" => "success", "data" => $likes]);
     }
     elseif ($action === 'report_post') {
         $postId = $_POST['post_id'] ?? '';

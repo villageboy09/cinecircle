@@ -18,6 +18,160 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
+  Future<void> _showForgotPasswordSheet() async {
+    final phoneController = TextEditingController(text: _phoneController.text);
+    final newPasswordController = TextEditingController();
+    bool isSubmitting = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 24,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Reset Password',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  labelText: 'Phone number',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: newPasswordController,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'New password',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: isSubmitting
+                      ? null
+                      : () async {
+                          final phone = phoneController.text.trim();
+                          final newPassword = newPasswordController.text;
+                          if (phone.isEmpty || newPassword.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter phone number and new password',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          setModalState(() => isSubmitting = true);
+                          try {
+                            final response = await http.post(
+                              Uri.parse(
+                                'https://team.cropsync.in/cine_circle/cinecircle_api.php',
+                              ),
+                              body: {
+                                'action': 'reset_password',
+                                'mobile_number': phone,
+                                'new_password': newPassword,
+                              },
+                            );
+                            if (!context.mounted) return;
+                            if (response.statusCode == 200) {
+                              final data = json.decode(response.body);
+                              if (data['status'] == 'success') {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Password reset successful'),
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      data['message'] ?? 'Reset failed',
+                                    ),
+                                  ),
+                                );
+                              }
+                            } else if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Reset failed')),
+                              );
+                            }
+                          } catch (e) {
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Network error: $e')),
+                            );
+                          } finally {
+                            if (context.mounted) {
+                              setModalState(() => isSubmitting = false);
+                            }
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: isSubmitting
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          'Reset Password',
+                          style: TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _login() async {
     final String phone = _phoneController.text.trim();
     final String password = _passwordController.text;
@@ -27,7 +181,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       return;
     }
-    
+
     setState(() {
       _isLoading = true;
     });
@@ -35,40 +189,41 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final response = await http.post(
         Uri.parse('https://team.cropsync.in/cine_circle/cinecircle_api.php'),
-        body: {
-          'action': 'login',
-          'mobile_number': phone,
-          'password': password,
-        },
+        body: {'action': 'login', 'mobile_number': phone, 'password': password},
       );
 
       final data = json.decode(response.body);
 
       if (data['status'] == 'success') {
-         final user = data['user'];
-         final prefs = await SharedPreferences.getInstance();
-         
-         await prefs.setString('user_name', user['full_name'] ?? 'User');
-         await prefs.setString('user_phone', user['mobile_number'] ?? phone);
-         await prefs.setString('account_type', user['account_type'] ?? 'Public');
-         debugPrint('Saved user_phone: ${user['mobile_number']}');
+        final user = data['user'];
+        final prefs = await SharedPreferences.getInstance();
+        final userId =
+            user['id']?.toString() ?? user['user_id']?.toString() ?? '';
 
-         if (!mounted) return;
-         Navigator.pushReplacement(
-           context,
-           MaterialPageRoute(builder: (context) => const HomeScreen()),
-         );
+        await prefs.setString('user_name', user['full_name'] ?? 'User');
+        await prefs.setString('user_phone', user['mobile_number'] ?? phone);
+        await prefs.setString('account_type', user['account_type'] ?? 'Public');
+        if (userId.isNotEmpty) {
+          await prefs.setString('user_id', userId);
+        }
+        debugPrint('Saved user_phone: ${user['mobile_number']}');
+
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
       } else {
-         if (!mounted) return;
-         ScaffoldMessenger.of(context).showSnackBar(
-           SnackBar(content: Text(data['message'] ?? 'Login failed')),
-         );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Login failed')),
+        );
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Network error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Network error: $e')));
     } finally {
       if (mounted) {
         setState(() {
@@ -210,7 +365,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
-                  onPressed: () {},
+                  onPressed: _showForgotPasswordSheet,
                   style: TextButton.styleFrom(
                     padding: EdgeInsets.zero,
                     minimumSize: Size.zero,
@@ -241,20 +396,23 @@ class _LoginScreenState extends State<LoginScreen> {
                   elevation: 0,
                   disabledBackgroundColor: Colors.grey.shade400,
                 ),
-                child: _isLoading 
-                  ? const SizedBox(
-                      height: 20, 
-                      width: 20, 
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                    )
-                  : const Text(
-                      'Log In',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text(
+                        'Log In',
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
               ),
               const SizedBox(height: 32),
             ],

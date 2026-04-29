@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
@@ -13,6 +14,7 @@ import 'follow_card.dart';
 import 'create_post_sheet.dart';
 import 'feed_video_player.dart';
 import 'public_profile_screen.dart';
+import 'global_notifier.dart';
 import 'package:shimmer/shimmer.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -31,11 +33,16 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _currentUserId;
   String? _userProfileImage;
   Map<String, double> _aspectRatios = {};
+  final Map<String, List<dynamic>> _viewersCache = {};
+  final Map<String, List<dynamic>> _likesCache = {};
 
   // FAB Scroll Logic
   late ScrollController _scrollController;
   bool _showFab = true;
   double _lastOffset = 0;
+  DateTime? _lastBackPress;
+  DateTime? _lastHomeTap;
+  DateTime? _lastAutoRefresh;
 
   @override
   void initState() {
@@ -61,6 +68,23 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _showFab = false);
     } else if (delta < -5 && !_showFab) {
       setState(() => _showFab = true);
+    }
+
+    final now = DateTime.now();
+    final canAutoRefresh =
+        _lastAutoRefresh == null ||
+        now.difference(_lastAutoRefresh!) > const Duration(seconds: 30);
+    if (canAutoRefresh) {
+      if (_scrollController.offset <= 30 && delta < -12) {
+        _lastAutoRefresh = now;
+        _fetchHomeFeed();
+      } else if (_scrollController.position.maxScrollExtent > 0 &&
+          _scrollController.offset >=
+              _scrollController.position.maxScrollExtent - 30 &&
+          delta > 12) {
+        _lastAutoRefresh = now;
+        _fetchHomeFeed();
+      }
     }
     _lastOffset = _scrollController.offset;
   }
@@ -118,10 +142,16 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
+  DateTime _parseServerTime(String timestamp) {
+    final hasZone = RegExp(r'(Z|[+-]\d{2}:\d{2})$').hasMatch(timestamp);
+    final normalized = hasZone ? timestamp : '${timestamp}Z';
+    return DateTime.parse(normalized).toLocal();
+  }
+
   String _formatTimeAgo(String? timestamp) {
     if (timestamp == null || timestamp.isEmpty) return 'Now';
     try {
-      final date = DateTime.parse(timestamp);
+      final date = _parseServerTime(timestamp);
       final difference = DateTime.now().difference(date);
       if (difference.inDays > 0) return '${difference.inDays}d';
       if (difference.inHours > 0) return '${difference.inHours}h';
@@ -241,6 +271,53 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _refreshHomeAndScrollTop() async {
+    await _fetchHomeFeed();
+    if (_scrollController.hasClients) {
+      await _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  void _handleHomeTap() {
+    if (_selectedIndex != 0) {
+      setState(() => _selectedIndex = 0);
+      return;
+    }
+
+    final now = DateTime.now();
+    if (_lastHomeTap != null &&
+        now.difference(_lastHomeTap!) <= const Duration(milliseconds: 350)) {
+      _lastHomeTap = null;
+      _refreshHomeAndScrollTop();
+    } else {
+      _lastHomeTap = now;
+    }
+  }
+
+  Future<bool> _handleBackPress() async {
+    if (_selectedIndex != 0) {
+      setState(() => _selectedIndex = 0);
+      return false;
+    }
+
+    final now = DateTime.now();
+    if (_lastBackPress == null ||
+        now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
+      _lastBackPress = now;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Press back again to exit')),
+        );
+      }
+      return false;
+    }
+    return true;
+  }
+
   void _showCommentsBottomSheet(String postId, int postIndex) {
     showModalBottomSheet(
       context: context,
@@ -275,6 +352,15 @@ class _HomeScreenState extends State<HomeScreen> {
     if (result == true) {
       _fetchHomeFeed();
     }
+  }
+
+  void _openHomeSearch() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HomeSearchScreen(currentUserId: _currentUserId ?? ''),
+      ),
+    );
   }
 
   void _showPostOptions(Map<String, dynamic> post) {
@@ -384,7 +470,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canEditPost(dynamic createdAt) {
     if (createdAt == null) return false;
     try {
-      final created = DateTime.parse(createdAt.toString()).toLocal();
+      final created = _parseServerTime(createdAt.toString());
       return DateTime.now().difference(created).inMinutes <= 15;
     } catch (_) {
       return false;
@@ -785,10 +871,7 @@ class _HomeScreenState extends State<HomeScreen> {
               future: _fetchViewers(postId),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(color: Colors.black),
-                  );
+                  return const ShimmerListPlaceholder();
                 }
                 final viewers = snapshot.data ?? [];
                 if (viewers.isEmpty) {
@@ -850,7 +933,111 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _showLikesBottomSheet(String postId) {
+    if (postId.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Likes',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<dynamic>>(
+              future: _fetchLikes(postId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const ShimmerListPlaceholder();
+                }
+                final likes = snapshot.data ?? [];
+                if (likes.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No likes yet.',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                  child: ListView.separated(
+                    itemCount: likes.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final user = likes[index];
+                      final name = user['full_name'] ?? 'User';
+                      final imageUrl = user['profile_image_url'] ?? '';
+                      final city = user['city'] ?? '';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.grey.shade200,
+                          backgroundImage: imageUrl.isNotEmpty
+                              ? NetworkImage(imageUrl)
+                              : null,
+                          child: imageUrl.isEmpty
+                              ? Icon(Icons.person, color: Colors.grey.shade500)
+                              : null,
+                        ),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: city.toString().isNotEmpty
+                            ? Text(
+                                city,
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<List<dynamic>> _fetchViewers(String postId) async {
+    if (_viewersCache.containsKey(postId)) {
+      return _viewersCache[postId]!;
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       final mobile = prefs.getString('user_phone') ?? '';
@@ -862,7 +1049,33 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
-          return List<dynamic>.from(data['data'] ?? []);
+          final viewers = List<dynamic>.from(data['data'] ?? []);
+          _viewersCache[postId] = viewers;
+          return viewers;
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<List<dynamic>> _fetchLikes(String postId) async {
+    if (_likesCache.containsKey(postId)) {
+      return _likesCache[postId]!;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mobile = prefs.getString('user_phone') ?? '';
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_post_likes&mobile_number=$mobile&post_id=$postId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          final likes = List<dynamic>.from(data['data'] ?? []);
+          _likesCache[postId] = likes;
+          return likes;
         }
       }
     } catch (_) {}
@@ -982,448 +1195,240 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (feedItems.length > 3) combinedFeed.addAll(feedItems.sublist(3));
 
-    return Scaffold(
-      backgroundColor: Colors.grey.shade100,
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: [
-          // Feed Tab (Index 0)
-          SafeArea(
-            child: Column(
-              children: [
-                // Top Bar
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20.0,
-                    vertical: 12.0,
-                  ),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    border: Border(
-                      bottom: BorderSide(color: Color(0xFFF0F0F0)),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldExit = await _handleBackPress();
+        if (shouldExit) {
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.grey.shade100,
+        body: IndexedStack(
+          index: _selectedIndex,
+          children: [
+            // Feed Tab (Index 0)
+            SafeArea(
+              child: Column(
+                children: [
+                  // Top Bar
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20.0,
+                      vertical: 12.0,
                     ),
-                  ),
-                  child: Row(
-                    children: [
-                      ClipRect(
-                        child: Container(
-                          height: 40,
-                          width: 140, // Adjust width as necessary
-                          alignment: Alignment.center,
-                          child: Transform.scale(
-                            scale: 2.2, // Scaling up to crop empty white space
-                            child: Image.asset(
-                              'assets/cinelogo.png',
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        bottom: BorderSide(color: Color(0xFFF0F0F0)),
                       ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.notifications_none,
-                          color: Colors.black,
-                          size: 26,
-                        ),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const ActivityScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _selectedIndex =
-                                5; // Index for Profile (Matches ProfileScreen position in IndexedStack)
-                          });
-                        },
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.grey.shade300,
-                              width: 1,
-                            ),
-                            image:
-                                _userProfileImage != null &&
-                                    _userProfileImage!.isNotEmpty
-                                ? DecorationImage(
-                                    image: NetworkImage(_userProfileImage!),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
-                          ),
-                          child: _userProfileImage == null
-                              ? const Icon(Icons.person, size: 20)
-                              : null,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // List
-                Expanded(
-                  child: _isLoading
-                      ? _buildFeedSkeleton()
-                      : RefreshIndicator(
-                          color: Colors.black,
-                          onRefresh: _fetchHomeFeed,
-                          child: ListView.separated(
-                            controller: _scrollController,
-                            padding: EdgeInsets.zero,
-                            itemCount: combinedFeed.length,
-                            separatorBuilder: (context, index) => Divider(
-                              height: 1,
-                              thickness: 0.5,
-                              color: Colors.grey.shade200,
-                            ),
-                            itemBuilder: (context, index) =>
-                                combinedFeed[index],
-                          ),
-                        ),
-                ),
-              ],
-            ),
-          ),
-          // Trivia Tab (Index 1)
-          const TriviaScreen(),
-          // Discover Tab (Index 2)
-          const DiscoverScreen(),
-          // Jobs Tab (Index 3)
-          const JobsScreen(),
-          // Messages (Chat) Tab (Index 4)
-          const MessagesScreen(),
-          // Profile Tab (Index 5)
-          const ProfileScreen(),
-        ],
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex > 4
-            ? 0
-            : _selectedIndex, // Reset if Profile is selected via AppBar
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.white,
-        selectedItemColor: Colors.black,
-        unselectedItemColor: Colors.grey.shade500,
-        showUnselectedLabels: true,
-        selectedLabelStyle: const TextStyle(
-          fontFamily: 'Google Sans',
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-        unselectedLabelStyle: const TextStyle(
-          fontFamily: 'Google Sans',
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-        ),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.emoji_events_outlined),
-            activeIcon: Icon(Icons.emoji_events),
-            label: 'Trivia',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.explore_outlined),
-            activeIcon: Icon(Icons.explore),
-            label: 'Discover',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.work_outline),
-            activeIcon: Icon(Icons.work),
-            label: 'Jobs',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline),
-            activeIcon: Icon(Icons.chat_bubble),
-            label: 'Chat',
-          ),
-        ],
-      ),
-      floatingActionButton: _selectedIndex == 0
-          ? AnimatedSlide(
-              duration: const Duration(milliseconds: 300),
-              offset: _showFab ? Offset.zero : const Offset(0, 3.5),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 300),
-                opacity: _showFab ? 1 : 0,
-                child: FloatingActionButton(
-                  onPressed: () => _openCreatePostSheet(),
-                  backgroundColor: Colors.black,
-                  shape: const CircleBorder(),
-                  child: const Icon(Icons.add, color: Colors.white, size: 30),
-                ),
-              ),
-            )
-          : null,
-    );
-  }
-
-  Widget _buildFeedItem(int index, Map<String, dynamic> post, {Key? key}) {
-    final String postId = post['id']?.toString() ?? '';
-    final String fullName = post['author_name'] ?? 'User';
-    final String profileImg = post['profile_image_url'] ?? '';
-    final String category = post['category'] ?? 'Update';
-    final String title = post['title'] ?? '';
-    final String description = post['description'] ?? '';
-    final String timeAgo = _formatTimeAgo(post['created_at']);
-    final double? storedRatio = _aspectRatios[postId];
-
-    final bool isLiked =
-        post['is_liked'] == 1 ||
-        post['is_liked'] == true ||
-        post['is_liked'] == '1';
-    final bool isSaved =
-        post['is_saved'] == 1 ||
-        post['is_saved'] == true ||
-        post['is_saved'] == '1';
-    final String likesCount = (post['likes_count'] ?? '0').toString();
-    final String commentsCount = (post['comments_count'] ?? '0').toString();
-    final String viewsCount = (post['views_count'] ?? '0').toString();
-
-    // Record view fire-and-forget (only once per postId per session)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (postId.isNotEmpty) _recordView(postId);
-    });
-
-    return Container(
-      key: key,
-      color: Colors.white,
-      padding: const EdgeInsets.symmetric(vertical: 14.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () => _openAuthorProfile(post),
-                  child: CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Colors.grey.shade200,
-                    backgroundImage: profileImg.isNotEmpty
-                        ? NetworkImage(profileImg)
-                        : null,
-                    child: profileImg.isEmpty
-                        ? Icon(Icons.person, color: Colors.grey.shade500)
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _openAuthorProfile(post),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                    child: Row(
                       children: [
-                        Text(
-                          fullName,
-                          style: const TextStyle(
-                            fontFamily: 'Google Sans',
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black,
+                        ClipRect(
+                          child: Container(
+                            height: 40,
+                            width: 140, // Adjust width as necessary
+                            alignment: Alignment.center,
+                            child: Transform.scale(
+                              scale:
+                                  2.2, // Scaling up to crop empty white space
+                              child: Image.asset(
+                                'assets/cinelogo.png',
+                                fit: BoxFit.contain,
+                              ),
+                            ),
                           ),
                         ),
-                        Text(
-                          timeAgo,
-                          style: TextStyle(
-                            fontFamily: 'Google Sans',
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.search,
+                            color: Colors.black,
+                            size: 24,
+                          ),
+                          onPressed: _openHomeSearch,
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.notifications_none,
+                            color: Colors.black,
+                            size: 26,
+                          ),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ActivityScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedIndex =
+                                  5; // Index for Profile (Matches ProfileScreen position in IndexedStack)
+                            });
+                          },
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.grey.shade300,
+                                width: 1,
+                              ),
+                              image:
+                                  _userProfileImage != null &&
+                                      _userProfileImage!.isNotEmpty
+                                  ? DecorationImage(
+                                      image: NetworkImage(_userProfileImage!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                            ),
+                            child: _userProfileImage == null
+                                ? const Icon(Icons.person, size: 20)
+                                : null,
                           ),
                         ),
                       ],
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
-                  onPressed: () => _showPostOptions(post),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Category and Title context
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                  // List
+                  Expanded(
+                    child: _isLoading
+                        ? _buildFeedSkeleton()
+                        : RefreshIndicator(
+                            color: Colors.black,
+                            onRefresh: _fetchHomeFeed,
+                            child: ListView.separated(
+                              controller: _scrollController,
+                              padding: EdgeInsets.zero,
+                              itemCount: combinedFeed.length,
+                              separatorBuilder: (context, index) => Divider(
+                                height: 1,
+                                thickness: 0.5,
+                                color: Colors.grey.shade200,
+                              ),
+                              itemBuilder: (context, index) =>
+                                  combinedFeed[index],
+                            ),
+                          ),
                   ),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    category,
-                    style: TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.blue.shade700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          // Description text
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Text(
-              description,
-              style: const TextStyle(
-                fontFamily: 'Google Sans',
-                fontSize: 14,
-                color: Colors.black87,
-                height: 1.4,
+                ],
               ),
             ),
-          ),
-          if ((post['media_url'] ?? '').toString().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            GestureDetector(
-              onDoubleTap: () => _toggleLike(index),
-              child: Container(
-                width: double.infinity,
-                color: Colors.grey.shade100,
-                child: post['media_type'] == 'image'
-                    ? AspectRatio(
-                        aspectRatio: storedRatio ?? 4 / 5,
-                        child: Image.network(
-                          post['media_url'],
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                        ),
-                      )
-                    : post['media_type'] == 'video'
-                    ? FeedVideoPlayer(videoUrl: post['media_url'])
-                    : const SizedBox.shrink(),
-              ),
-            ),
-            const SizedBox(height: 16),
+            // Trivia Tab (Index 1)
+            const TriviaScreen(),
+            // Discover Tab (Index 2)
+            const DiscoverScreen(),
+            // Jobs Tab (Index 3)
+            const JobsScreen(),
+            // Messages (Chat) Tab (Index 4)
+            const MessagesScreen(),
+            // Profile Tab (Index 5)
+            const ProfileScreen(),
           ],
-          // Actions
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () => _toggleLike(index),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isLiked ? Icons.favorite : Icons.favorite_border,
-                        size: 26,
-                        color: isLiked ? Colors.red : Colors.black87,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        likesCount,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 20),
-                GestureDetector(
-                  onTap: () => _showCommentsBottomSheet(postId, index),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.chat_bubble_outline,
-                        size: 24,
-                        color: Colors.black87,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        commentsCount,
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 20),
-                // Views count
-                GestureDetector(
-                  onTap: () => _showViewsBottomSheet(postId),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.visibility_outlined,
-                        size: 22,
-                        color: Colors.grey.shade600,
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        viewsCount,
-                        style: TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                // Bookmark / Save button
-                GestureDetector(
-                  onTap: () => _toggleSave(index),
-                  child: Icon(
-                    isSaved ? Icons.bookmark : Icons.bookmark_border,
-                    size: 26,
-                    color: isSaved ? Colors.black : Colors.black87,
-                  ),
-                ),
-              ],
-            ),
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _selectedIndex > 4
+              ? 0
+              : _selectedIndex, // Reset if Profile is selected via AppBar
+          onTap: (index) {
+            if (index == 0) {
+              _handleHomeTap();
+            } else {
+              setState(() => _selectedIndex = index);
+            }
+          },
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: Colors.white,
+          selectedItemColor: Colors.black,
+          unselectedItemColor: Colors.grey.shade500,
+          showUnselectedLabels: true,
+          selectedLabelStyle: const TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
           ),
-        ],
+          unselectedLabelStyle: const TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home),
+              label: 'Home',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.emoji_events_outlined),
+              activeIcon: Icon(Icons.emoji_events),
+              label: 'Trivia',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.explore_outlined),
+              activeIcon: Icon(Icons.explore),
+              label: 'Discover',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.work_outline),
+              activeIcon: Icon(Icons.work),
+              label: 'Jobs',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.chat_bubble_outline),
+              activeIcon: Icon(Icons.chat_bubble),
+              label: 'Chat',
+            ),
+          ],
+        ),
+        floatingActionButton: _selectedIndex == 0
+            ? AnimatedSlide(
+                duration: const Duration(milliseconds: 300),
+                offset: _showFab ? Offset.zero : const Offset(0, 3.5),
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 300),
+                  opacity: _showFab ? 1 : 0,
+                  child: FloatingActionButton(
+                    onPressed: () => _openCreatePostSheet(),
+                    backgroundColor: Colors.black,
+                    shape: const CircleBorder(),
+                    child: const Icon(Icons.add, color: Colors.white, size: 30),
+                  ),
+                ),
+              )
+            : null,
       ),
+    );
+  }
+
+  Widget _buildFeedItem(int index, Map<String, dynamic> post, {Key? key}) {
+    final String postId = post['id']?.toString() ?? '';
+    final String timeAgo = _formatTimeAgo(post['created_at']);
+    final double? storedRatio = _aspectRatios[postId];
+    return FeedPostItem(
+      key: key,
+      post: post,
+      timeAgo: timeAgo,
+      aspectRatio: storedRatio,
+      onOpenAuthor: () => _openAuthorProfile(post),
+      onShowOptions: () => _showPostOptions(post),
+      onToggleLike: () => _toggleLike(index),
+      onShowLikes: () => _showLikesBottomSheet(postId),
+      onShowComments: () => _showCommentsBottomSheet(postId, index),
+      onShowViews: () => _showViewsBottomSheet(postId),
+      onToggleSave: () => _toggleSave(index),
+      onRecordView: postId.isNotEmpty ? () => _recordView(postId) : null,
+      onDoubleTapLike: () => _toggleLike(index),
     );
   }
 
@@ -1532,6 +1537,285 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+class FeedPostItem extends StatelessWidget {
+  final Map<String, dynamic> post;
+  final String timeAgo;
+  final double? aspectRatio;
+  final VoidCallback onOpenAuthor;
+  final VoidCallback onShowOptions;
+  final VoidCallback onToggleLike;
+  final VoidCallback onShowLikes;
+  final VoidCallback onShowComments;
+  final VoidCallback onShowViews;
+  final VoidCallback onToggleSave;
+  final VoidCallback? onRecordView;
+  final VoidCallback? onDoubleTapLike;
+  final bool showOptions;
+
+  const FeedPostItem({
+    super.key,
+    required this.post,
+    required this.timeAgo,
+    this.aspectRatio,
+    required this.onOpenAuthor,
+    required this.onShowOptions,
+    required this.onToggleLike,
+    required this.onShowLikes,
+    required this.onShowComments,
+    required this.onShowViews,
+    required this.onToggleSave,
+    this.onRecordView,
+    this.onDoubleTapLike,
+    this.showOptions = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String postId = post['id']?.toString() ?? '';
+    final String fullName = post['author_name'] ?? 'User';
+    final String profileImg = post['profile_image_url'] ?? '';
+    final String category = post['category'] ?? 'Update';
+    final String title = post['title'] ?? '';
+    final String description = post['description'] ?? '';
+
+    final bool isLiked =
+        post['is_liked'] == 1 ||
+        post['is_liked'] == true ||
+        post['is_liked'] == '1';
+    final bool isSaved =
+        post['is_saved'] == 1 ||
+        post['is_saved'] == true ||
+        post['is_saved'] == '1';
+    final String likesCount = (post['likes_count'] ?? '0').toString();
+    final String commentsCount = (post['comments_count'] ?? '0').toString();
+    final String viewsCount = (post['views_count'] ?? '0').toString();
+
+    if (onRecordView != null && postId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => onRecordView!());
+    }
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 14.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: onOpenAuthor,
+                  child: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.grey.shade200,
+                    backgroundImage: profileImg.isNotEmpty
+                        ? NetworkImage(profileImg)
+                        : null,
+                    child: profileImg.isEmpty
+                        ? Icon(Icons.person, color: Colors.grey.shade500)
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: onOpenAuthor,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          fullName,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black,
+                          ),
+                        ),
+                        Text(
+                          timeAgo,
+                          style: TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (showOptions)
+                  IconButton(
+                    icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
+                    onPressed: onShowOptions,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Category and Title
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    category,
+                    style: TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Description
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Text(
+              description,
+              style: const TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 14,
+                color: Colors.black87,
+                height: 1.4,
+              ),
+            ),
+          ),
+          if ((post['media_url'] ?? '').toString().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            GestureDetector(
+              onDoubleTap: onDoubleTapLike,
+              child: Container(
+                width: double.infinity,
+                color: Colors.grey.shade100,
+                child: post['media_type'] == 'image'
+                    ? AspectRatio(
+                        aspectRatio: aspectRatio ?? 4 / 5,
+                        child: Image.network(
+                          post['media_url'],
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                        ),
+                      )
+                    : post['media_type'] == 'video'
+                    ? FeedVideoPlayer(videoUrl: post['media_url'])
+                    : const SizedBox.shrink(),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          // Actions
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: onToggleLike,
+                  child: Icon(
+                    isLiked ? Icons.favorite : Icons.favorite_border,
+                    size: 26,
+                    color: isLiked ? Colors.red : Colors.black87,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: onShowLikes,
+                  child: Text(
+                    likesCount,
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 20),
+                GestureDetector(
+                  onTap: onShowComments,
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.chat_bubble_outline,
+                        size: 24,
+                        color: Colors.black87,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        commentsCount,
+                        style: const TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 20),
+                GestureDetector(
+                  onTap: onShowViews,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.visibility_outlined,
+                        size: 22,
+                        color: Colors.grey.shade600,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        viewsCount,
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: onToggleSave,
+                  child: Icon(
+                    isSaved ? Icons.bookmark : Icons.bookmark_border,
+                    size: 26,
+                    color: isSaved ? Colors.black : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ──────────────────────────────────────────────
 // Standalone Comments Bottom Sheet Widget
 // ──────────────────────────────────────────────
@@ -1543,6 +1827,71 @@ class _CommentsSheet extends StatefulWidget {
 
   @override
   State<_CommentsSheet> createState() => _CommentsSheetState();
+}
+
+class ShimmerListPlaceholder extends StatelessWidget {
+  final int itemCount;
+
+  const ShimmerListPlaceholder({super.key, this.itemCount = 6});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.4,
+      child: Shimmer.fromColors(
+        baseColor: Colors.grey.shade200,
+        highlightColor: Colors.grey.shade100,
+        child: ListView.separated(
+          itemCount: itemCount,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: 120,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _CommentsSheetState extends State<_CommentsSheet> {
@@ -1867,6 +2216,1249 @@ class _CommentsSheetState extends State<_CommentsSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────
+// Home Search Screen
+// ──────────────────────────────────────────────
+class HomeSearchScreen extends StatefulWidget {
+  final String currentUserId;
+
+  const HomeSearchScreen({super.key, required this.currentUserId});
+
+  @override
+  State<HomeSearchScreen> createState() => _HomeSearchScreenState();
+}
+
+class _HomeSearchScreenState extends State<HomeSearchScreen> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  Timer? _debounce;
+  bool _isLoading = false;
+  List<dynamic> _users = [];
+  List<dynamic> _posts = [];
+  final Map<String, List<dynamic>> _viewersCache = {};
+  final Map<String, List<dynamic>> _likesCache = {};
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<String> _getMobile() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('user_phone') ?? '';
+  }
+
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      _fetchResults(value.trim());
+    });
+  }
+
+  Future<void> _fetchResults(String query) async {
+    if (query.isEmpty) {
+      setState(() {
+        _users = [];
+        _posts = [];
+        _isLoading = false;
+      });
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final mobile = await _getMobile();
+      final uri = Uri.parse(
+        'https://team.cropsync.in/cine_circle/social_api.php?action=search_home&mobile_number=$mobile&query=${Uri.encodeComponent(query)}',
+      );
+      final res = await http.get(uri);
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['status'] == 'success') {
+          setState(() {
+            _users = data['data']?['users'] ?? [];
+            _posts = data['data']?['posts'] ?? [];
+          });
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _toggleFollow(int index) async {
+    final user = _users[index];
+    final wasFollowing = user['is_following'] == true;
+    final targetId = user['id'].toString();
+    setState(() {
+      _users[index] = {...user, 'is_following': !wasFollowing};
+    });
+
+    try {
+      final mobile = await _getMobile();
+      final res = await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/social_api.php'),
+        body: {
+          'action': 'toggle_follow',
+          'mobile_number': mobile,
+          'target_user_id': user['id'].toString(),
+        },
+      );
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['status'] == 'success' && mounted) {
+          final next = data['is_following'] == true;
+          setState(() {
+            _users[index] = {..._users[index], 'is_following': next};
+          });
+          GlobalNotifier.instance.updateFollowState(targetId, next);
+          if (next != wasFollowing) {
+            GlobalNotifier.instance.adjustFollowing(next ? 1 : -1);
+          }
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _users[index] = {...user, 'is_following': wasFollowing};
+        });
+      }
+    }
+  }
+
+  void _openProfile(String userId) {
+    if (userId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PublicProfileScreen(userId: userId)),
+    );
+  }
+
+  DateTime _parseServerTime(String timestamp) {
+    final hasZone = RegExp(r'(Z|[+-]\\d{2}:\\d{2})$').hasMatch(timestamp);
+    final normalized = hasZone ? timestamp : '${timestamp}Z';
+    return DateTime.parse(normalized).toLocal();
+  }
+
+  String _formatTimeAgo(String? timestamp) {
+    if (timestamp == null || timestamp.isEmpty) return 'Now';
+    try {
+      final date = _parseServerTime(timestamp);
+      final difference = DateTime.now().difference(date);
+      if (difference.inDays > 0) return '${difference.inDays}d';
+      if (difference.inHours > 0) return '${difference.inHours}h';
+      if (difference.inMinutes > 0) return '${difference.inMinutes}m';
+      return 'Now';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _recordView(String postId) async {
+    try {
+      final mobile = await _getMobile();
+      if (mobile.isEmpty) return;
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'view_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _toggleLikeForPost(int index) async {
+    final post = _posts[index];
+    final postId = post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+    final isLiked =
+        post['is_liked'] == 1 ||
+        post['is_liked'] == true ||
+        post['is_liked'] == '1';
+
+    setState(() {
+      _posts[index]['is_liked'] = !isLiked;
+      final current = int.tryParse(post['likes_count']?.toString() ?? '0') ?? 0;
+      _posts[index]['likes_count'] = isLiked ? current - 1 : current + 1;
+    });
+
+    try {
+      final mobile = await _getMobile();
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'like_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _toggleSaveForPost(int index) async {
+    final post = _posts[index];
+    final postId = post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+    final isSaved =
+        post['is_saved'] == 1 ||
+        post['is_saved'] == true ||
+        post['is_saved'] == '1';
+
+    setState(() {
+      _posts[index]['is_saved'] = !isSaved;
+    });
+
+    try {
+      final mobile = await _getMobile();
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'save_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+    } catch (_) {}
+  }
+
+  void _showCommentsBottomSheet(String postId, int postIndex) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _CommentsSheet(
+        postId: postId,
+        onCommentAdded: () {
+          setState(() {
+            final currentCount =
+                int.tryParse(
+                  _posts[postIndex]['comments_count']?.toString() ?? '0',
+                ) ??
+                0;
+            _posts[postIndex]['comments_count'] = (currentCount + 1).toString();
+          });
+        },
+      ),
+    );
+  }
+
+  void _showLikesBottomSheet(String postId) {
+    if (postId.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Likes',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<dynamic>>(
+              future: _fetchLikes(postId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const ShimmerListPlaceholder();
+                }
+                final likes = snapshot.data ?? [];
+                if (likes.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No likes yet.',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                  child: ListView.separated(
+                    itemCount: likes.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final user = likes[index];
+                      final name = user['full_name'] ?? 'User';
+                      final imageUrl = user['profile_image_url'] ?? '';
+                      final city = user['city'] ?? '';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.grey.shade200,
+                          backgroundImage: imageUrl.isNotEmpty
+                              ? NetworkImage(imageUrl)
+                              : null,
+                          child: imageUrl.isEmpty
+                              ? Icon(Icons.person, color: Colors.grey.shade500)
+                              : null,
+                        ),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: city.toString().isNotEmpty
+                            ? Text(
+                                city,
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showViewsBottomSheet(String postId) {
+    if (postId.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Viewers',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<dynamic>>(
+              future: _fetchViewers(postId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const ShimmerListPlaceholder();
+                }
+                final viewers = snapshot.data ?? [];
+                if (viewers.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No viewers yet.',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                  child: ListView.separated(
+                    itemCount: viewers.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final viewer = viewers[index];
+                      final name = viewer['full_name'] ?? 'User';
+                      final imageUrl = viewer['profile_image_url'] ?? '';
+                      final city = viewer['city'] ?? '';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.grey.shade200,
+                          backgroundImage: imageUrl.isNotEmpty
+                              ? NetworkImage(imageUrl)
+                              : null,
+                          child: imageUrl.isEmpty
+                              ? Icon(Icons.person, color: Colors.grey.shade500)
+                              : null,
+                        ),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: city.toString().isNotEmpty
+                            ? Text(
+                                city,
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<List<dynamic>> _fetchViewers(String postId) async {
+    if (_viewersCache.containsKey(postId)) {
+      return _viewersCache[postId]!;
+    }
+    try {
+      final mobile = await _getMobile();
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_post_viewers&mobile_number=$mobile&post_id=$postId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          final viewers = List<dynamic>.from(data['data'] ?? []);
+          _viewersCache[postId] = viewers;
+          return viewers;
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<List<dynamic>> _fetchLikes(String postId) async {
+    if (_likesCache.containsKey(postId)) {
+      return _likesCache[postId]!;
+    }
+    try {
+      final mobile = await _getMobile();
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_post_likes&mobile_number=$mobile&post_id=$postId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          final likes = List<dynamic>.from(data['data'] ?? []);
+          _likesCache[postId] = likes;
+          return likes;
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
+        title: const Text(
+          'Search',
+          style: TextStyle(
+            fontFamily: 'Google Sans',
+            color: Colors.black,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: _onSearchChanged,
+                decoration: InputDecoration(
+                  hintText: 'Search users and posts...',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: Colors.black),
+                    )
+                  : _users.isEmpty && _posts.isEmpty
+                  ? Center(
+                      child: Text(
+                        'Start typing to search',
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      children: [
+                        if (_users.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Users',
+                            style: TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ..._users.asMap().entries.map((entry) {
+                            final i = entry.key;
+                            final u = entry.value as Map<String, dynamic>;
+                            final userId = u['id']?.toString() ?? '';
+                            final isSelf = userId == widget.currentUserId;
+                            final isFollowing = u['is_following'] == true;
+                            final imageUrl = u['profile_image_url'] ?? '';
+                            return ListTile(
+                              onTap: () => _openProfile(userId),
+                              leading: CircleAvatar(
+                                backgroundColor: Colors.grey.shade200,
+                                backgroundImage: imageUrl.toString().isNotEmpty
+                                    ? NetworkImage(imageUrl)
+                                    : null,
+                                child: imageUrl.toString().isEmpty
+                                    ? Icon(
+                                        Icons.person,
+                                        color: Colors.grey.shade500,
+                                      )
+                                    : null,
+                              ),
+                              title: Text(
+                                u['full_name'] ?? 'User',
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: Text(
+                                [u['role_title'], u['city']]
+                                    .where(
+                                      (v) =>
+                                          v != null && v.toString().isNotEmpty,
+                                    )
+                                    .join(' • '),
+                                style: TextStyle(
+                                  fontFamily: 'Google Sans',
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                              trailing: isSelf
+                                  ? null
+                                  : TextButton(
+                                      onPressed: () => _toggleFollow(i),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: isFollowing
+                                            ? Colors.black
+                                            : Colors.white,
+                                        backgroundColor: isFollowing
+                                            ? Colors.grey.shade200
+                                            : Colors.black,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 8,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            20,
+                                          ),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        isFollowing ? 'Following' : 'Follow',
+                                        style: const TextStyle(
+                                          fontFamily: 'Google Sans',
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                            );
+                          }),
+                          const Divider(height: 24),
+                        ],
+                        if (_posts.isNotEmpty) ...[
+                          const Text(
+                            'Posts',
+                            style: TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ..._posts.asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final post = entry.value as Map<String, dynamic>;
+                            final postId = post['id']?.toString() ?? '';
+                            return Column(
+                              children: [
+                                FeedPostItem(
+                                  post: post,
+                                  timeAgo: _formatTimeAgo(post['created_at']),
+                                  onOpenAuthor: () => _openProfile(
+                                    post['user_id']?.toString() ?? '',
+                                  ),
+                                  onShowOptions: () {},
+                                  onToggleLike: () => _toggleLikeForPost(index),
+                                  onShowLikes: () =>
+                                      _showLikesBottomSheet(postId),
+                                  onShowComments: () =>
+                                      _showCommentsBottomSheet(postId, index),
+                                  onShowViews: () =>
+                                      _showViewsBottomSheet(postId),
+                                  onToggleSave: () => _toggleSaveForPost(index),
+                                  onRecordView: postId.isNotEmpty
+                                      ? () => _recordView(postId)
+                                      : null,
+                                  onDoubleTapLike: () =>
+                                      _toggleLikeForPost(index),
+                                  showOptions: false,
+                                ),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            PostDetailScreen(post: post),
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Open post',
+                                      style: TextStyle(
+                                        fontFamily: 'Google Sans',
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const Divider(height: 24),
+                              ],
+                            );
+                          }),
+                        ],
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────
+// Post Detail Screen (from search results)
+// ──────────────────────────────────────────────
+class PostDetailScreen extends StatefulWidget {
+  final Map<String, dynamic> post;
+
+  const PostDetailScreen({super.key, required this.post});
+
+  @override
+  State<PostDetailScreen> createState() => _PostDetailScreenState();
+}
+
+class _PostDetailScreenState extends State<PostDetailScreen> {
+  late Map<String, dynamic> _post;
+  List<dynamic> _comments = [];
+  bool _isLoadingComments = true;
+  final Map<String, List<dynamic>> _viewersCache = {};
+  final Map<String, List<dynamic>> _likesCache = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _post = Map<String, dynamic>.from(widget.post);
+    final postId = _post['id']?.toString() ?? '';
+    if (postId.isNotEmpty) {
+      _recordView(postId);
+      _fetchComments(postId);
+    }
+  }
+
+  Future<String> _getMobile() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('user_phone') ?? '';
+  }
+
+  DateTime _parseServerTime(String timestamp) {
+    final hasZone = RegExp(r'(Z|[+-]\\d{2}:\\d{2})$').hasMatch(timestamp);
+    final normalized = hasZone ? timestamp : '${timestamp}Z';
+    return DateTime.parse(normalized).toLocal();
+  }
+
+  String _formatTimeAgo(String? timestamp) {
+    if (timestamp == null || timestamp.isEmpty) return 'Now';
+    try {
+      final date = _parseServerTime(timestamp);
+      final difference = DateTime.now().difference(date);
+      if (difference.inDays > 0) return '${difference.inDays}d';
+      if (difference.inHours > 0) return '${difference.inHours}h';
+      if (difference.inMinutes > 0) return '${difference.inMinutes}m';
+      return 'Now';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _recordView(String postId) async {
+    try {
+      final mobile = await _getMobile();
+      if (mobile.isEmpty) return;
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'view_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _toggleLike() async {
+    final postId = _post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+    final isLiked =
+        _post['is_liked'] == 1 ||
+        _post['is_liked'] == true ||
+        _post['is_liked'] == '1';
+
+    setState(() {
+      _post['is_liked'] = !isLiked;
+      final current =
+          int.tryParse(_post['likes_count']?.toString() ?? '0') ?? 0;
+      _post['likes_count'] = isLiked ? current - 1 : current + 1;
+    });
+
+    try {
+      final mobile = await _getMobile();
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'like_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _toggleSave() async {
+    final postId = _post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+    final isSaved =
+        _post['is_saved'] == 1 ||
+        _post['is_saved'] == true ||
+        _post['is_saved'] == '1';
+
+    setState(() {
+      _post['is_saved'] = !isSaved;
+    });
+
+    try {
+      final mobile = await _getMobile();
+      await http.post(
+        Uri.parse('https://team.cropsync.in/cine_circle/feed_actions_api.php'),
+        body: {
+          'action': 'save_post',
+          'mobile_number': mobile,
+          'post_id': postId,
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _fetchComments(String postId) async {
+    setState(() => _isLoadingComments = true);
+    try {
+      final mobile = await _getMobile();
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_comments&mobile_number=$mobile&post_id=$postId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          setState(() {
+            _comments = data['data'] ?? [];
+          });
+        }
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isLoadingComments = false);
+  }
+
+  void _showCommentsBottomSheet(String postId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _CommentsSheet(
+        postId: postId,
+        onCommentAdded: () {
+          setState(() {
+            final currentCount =
+                int.tryParse(_post['comments_count']?.toString() ?? '0') ?? 0;
+            _post['comments_count'] = (currentCount + 1).toString();
+          });
+          _fetchComments(postId);
+        },
+      ),
+    );
+  }
+
+  void _showLikesBottomSheet(String postId) {
+    if (postId.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Likes',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<dynamic>>(
+              future: _fetchLikes(postId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const ShimmerListPlaceholder();
+                }
+                final likes = snapshot.data ?? [];
+                if (likes.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No likes yet.',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                  child: ListView.separated(
+                    itemCount: likes.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final user = likes[index];
+                      final name = user['full_name'] ?? 'User';
+                      final imageUrl = user['profile_image_url'] ?? '';
+                      final city = user['city'] ?? '';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.grey.shade200,
+                          backgroundImage: imageUrl.isNotEmpty
+                              ? NetworkImage(imageUrl)
+                              : null,
+                          child: imageUrl.isEmpty
+                              ? Icon(Icons.person, color: Colors.grey.shade500)
+                              : null,
+                        ),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: city.toString().isNotEmpty
+                            ? Text(
+                                city,
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showViewsBottomSheet(String postId) {
+    if (postId.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Viewers',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<dynamic>>(
+              future: _fetchViewers(postId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const ShimmerListPlaceholder();
+                }
+                final viewers = snapshot.data ?? [];
+                if (viewers.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No viewers yet.',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                  child: ListView.separated(
+                    itemCount: viewers.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final viewer = viewers[index];
+                      final name = viewer['full_name'] ?? 'User';
+                      final imageUrl = viewer['profile_image_url'] ?? '';
+                      final city = viewer['city'] ?? '';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.grey.shade200,
+                          backgroundImage: imageUrl.isNotEmpty
+                              ? NetworkImage(imageUrl)
+                              : null,
+                          child: imageUrl.isEmpty
+                              ? Icon(Icons.person, color: Colors.grey.shade500)
+                              : null,
+                        ),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            fontFamily: 'Google Sans',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: city.toString().isNotEmpty
+                            ? Text(
+                                city,
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<List<dynamic>> _fetchViewers(String postId) async {
+    if (_viewersCache.containsKey(postId)) {
+      return _viewersCache[postId]!;
+    }
+    try {
+      final mobile = await _getMobile();
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_post_viewers&mobile_number=$mobile&post_id=$postId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          final viewers = List<dynamic>.from(data['data'] ?? []);
+          _viewersCache[postId] = viewers;
+          return viewers;
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<List<dynamic>> _fetchLikes(String postId) async {
+    if (_likesCache.containsKey(postId)) {
+      return _likesCache[postId]!;
+    }
+    try {
+      final mobile = await _getMobile();
+      final response = await http.get(
+        Uri.parse(
+          'https://team.cropsync.in/cine_circle/feed_actions_api.php?action=get_post_likes&mobile_number=$mobile&post_id=$postId',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          final likes = List<dynamic>.from(data['data'] ?? []);
+          _likesCache[postId] = likes;
+          return likes;
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  void _openAuthorProfile() {
+    final authorId = _post['user_id']?.toString() ?? '';
+    if (authorId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PublicProfileScreen(userId: authorId)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final postId = _post['id']?.toString() ?? '';
+    return Scaffold(
+      backgroundColor: Colors.grey.shade100,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
+        title: const Text(
+          'Post',
+          style: TextStyle(
+            fontFamily: 'Google Sans',
+            color: Colors.black,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      body: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          FeedPostItem(
+            post: _post,
+            timeAgo: _formatTimeAgo(_post['created_at']),
+            onOpenAuthor: _openAuthorProfile,
+            onShowOptions: () {},
+            onToggleLike: _toggleLike,
+            onShowLikes: () => _showLikesBottomSheet(postId),
+            onShowComments: () => _showCommentsBottomSheet(postId),
+            onShowViews: () => _showViewsBottomSheet(postId),
+            onToggleSave: _toggleSave,
+            onDoubleTapLike: _toggleLike,
+            showOptions: false,
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Comments',
+                  style: TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _showCommentsBottomSheet(postId),
+                  child: const Text(
+                    'Add',
+                    style: TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_isLoadingComments)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                child: CircularProgressIndicator(color: Colors.black),
+              ),
+            )
+          else if (_comments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'No comments yet. Be the first!',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _comments.length,
+              itemBuilder: (context, i) {
+                final c = _comments[i];
+                final imageUrl = c['profile_image_url'] ?? '';
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.grey.shade200,
+                    backgroundImage: imageUrl.isNotEmpty
+                        ? NetworkImage(imageUrl)
+                        : null,
+                    child: imageUrl.isEmpty
+                        ? Icon(Icons.person, color: Colors.grey.shade500)
+                        : null,
+                  ),
+                  title: Text(
+                    c['full_name'] ?? 'User',
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: Text(
+                    c['comment'] ?? '',
+                    style: const TextStyle(fontFamily: 'Google Sans'),
+                  ),
+                  trailing: Text(
+                    _formatTimeAgo(c['created_at']),
+                    style: TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 11,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
+                );
+              },
+            ),
+          const SizedBox(height: 24),
+        ],
       ),
     );
   }
