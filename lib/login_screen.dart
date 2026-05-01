@@ -203,6 +203,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await prefs.setString('user_name', user['full_name'] ?? 'User');
         await prefs.setString('user_phone', user['mobile_number'] ?? phone);
         await prefs.setString('account_type', user['account_type'] ?? 'Public');
+        await prefs.setString('user_image', user['profile_image_url'] ?? '');
         if (userId.isNotEmpty) {
           await prefs.setString('user_id', userId);
         }

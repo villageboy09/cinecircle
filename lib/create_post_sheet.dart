@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,7 +6,55 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart';
+import 'package:video_player/video_player.dart';
 import 'global_notifier.dart';
+
+class _CropArgs {
+  final Uint8List bytes;
+  final double ratio;
+  final String destPath;
+  _CropArgs(this.bytes, this.ratio, this.destPath);
+}
+
+bool _processAndCropImage(_CropArgs args) {
+  try {
+    img.Image? decoded = img.decodeImage(args.bytes);
+    if (decoded == null) return false;
+    
+    final double current = decoded.width / decoded.height;
+    img.Image cropped;
+    if ((current - args.ratio).abs() < 0.01) {
+      cropped = decoded;
+    } else if (current > args.ratio) {
+      final int w = (decoded.height * args.ratio).toInt();
+      final int x = (decoded.width - w) ~/ 2;
+      cropped = img.copyCrop(
+        decoded,
+        x: x,
+        y: 0,
+        width: w,
+        height: decoded.height,
+      );
+    } else {
+      final int h = (decoded.width / args.ratio).toInt();
+      final int y = (decoded.height - h) ~/ 2;
+      cropped = img.copyCrop(
+        decoded,
+        x: 0,
+        y: y,
+        width: decoded.width,
+        height: h,
+      );
+    }
+    
+    File(args.destPath).writeAsBytesSync(img.encodeJpg(cropped, quality: 90));
+    return true;
+  } catch (e) {
+    debugPrint('Crop error background: $e');
+    return false;
+  }
+}
 
 // ── Aspect ratio options ────────────────────────────────────────────────────
 class _AspectOption {
@@ -51,14 +98,14 @@ const _aspectOptions = <_AspectOption>[
   ),
 ];
 
-class CreatePostSheet extends StatefulWidget {
-  const CreatePostSheet({super.key});
+class CreatePostScreen extends StatefulWidget {
+  const CreatePostScreen({super.key});
 
   @override
-  State<CreatePostSheet> createState() => _CreatePostSheetState();
+  State<CreatePostScreen> createState() => _CreatePostScreenState();
 }
 
-class _CreatePostSheetState extends State<CreatePostSheet> {
+class _CreatePostScreenState extends State<CreatePostScreen> {
   final _titleController = TextEditingController();
   final _descController = TextEditingController();
 
@@ -68,6 +115,7 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
   String _mediaType = 'image';
   bool _isPosting = false;
   int _selectedRatioIndex = 1; // default: 4:5 Portrait
+  VideoPlayerController? _videoController;
 
   final List<String> _categories = [
     'Project Update',
@@ -81,6 +129,7 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
   void dispose() {
     _titleController.dispose();
     _descController.dispose();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -96,15 +145,24 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
     if (picked == null) return;
 
     final raw = File(picked.path);
+    
+    if (isVideo) {
+      _videoController?.dispose();
+      _videoController = VideoPlayerController.file(raw);
+      await _videoController!.initialize();
+      _videoController!.setLooping(true);
+      _videoController!.play();
+    }
+
     setState(() {
       _rawFile = raw;
+      _displayFile = raw; // Show original immediately to avoid glitch/delay
       _mediaType = isVideo ? 'video' : 'image';
     });
 
     if (!isVideo) {
-      await _applyRatio(_aspectOptions[_selectedRatioIndex].ratio);
-    } else {
-      setState(() => _displayFile = raw);
+      // Background crop
+      _applyRatio(_aspectOptions[_selectedRatioIndex].ratio);
     }
   }
 
@@ -113,57 +171,34 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
     if (_rawFile == null || _mediaType != 'image') return;
 
     if (ratio == null) {
-      // Original — no crop
-      setState(() => _displayFile = _rawFile);
+      setState(() {
+        _displayFile = _rawFile;
+      });
       return;
     }
 
     try {
       final Uint8List bytes = await _rawFile!.readAsBytes();
-      img.Image? decoded = img.decodeImage(bytes);
-      if (decoded == null) {
-        setState(() => _displayFile = _rawFile);
-        return;
-      }
-
-      final double current = decoded.width / decoded.height;
-
-      img.Image cropped;
-      if ((current - ratio).abs() < 0.01) {
-        cropped = decoded; // already correct
-      } else if (current > ratio) {
-        // Too wide → trim sides
-        final int w = (decoded.height * ratio).toInt();
-        final int x = (decoded.width - w) ~/ 2;
-        cropped = img.copyCrop(
-          decoded,
-          x: x,
-          y: 0,
-          width: w,
-          height: decoded.height,
-        );
-      } else {
-        // Too tall → trim top/bottom
-        final int h = (decoded.width / ratio).toInt();
-        final int y = (decoded.height - h) ~/ 2;
-        cropped = img.copyCrop(
-          decoded,
-          x: 0,
-          y: y,
-          width: decoded.width,
-          height: h,
-        );
-      }
-
       final dir = await getTemporaryDirectory();
-      final path =
-          '${dir.path}/post_${ratio.toStringAsFixed(2)}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final file = File(path)
-        ..writeAsBytesSync(img.encodeJpg(cropped, quality: 90));
-      if (mounted) setState(() => _displayFile = file);
+      final path = '${dir.path}/post_${ratio.toStringAsFixed(2)}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      
+      final args = _CropArgs(bytes, ratio, path);
+      final success = await compute(_processAndCropImage, args);
+      
+      if (mounted) {
+        setState(() {
+          if (success) {
+            _displayFile = File(path);
+          }
+        });
+      }
     } catch (e) {
-      debugPrint('Crop error: $e');
-      setState(() => _displayFile = _rawFile);
+      debugPrint('Crop dispatch error: $e');
+      if (mounted) {
+        setState(() {
+          _displayFile = _rawFile; // Fallback to raw on error
+        });
+      }
     }
   }
 
@@ -302,61 +337,33 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
   // ── Build ────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-
-    return Container(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF9FAFB),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF9FAFB),
+        elevation: 0,
+        centerTitle: true,
+        title: const Text(
+          'New Post',
+          style: TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Colors.black,
+          ),
+        ),
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.close, color: Colors.black),
+        ),
       ),
-      child: SafeArea(
-        top: false,
+      body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Drag handle ──
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Header ──
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'New Post',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, size: 22),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.grey.shade200,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.all(8),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
 
               // ── Category chips ──
               _sectionLabel('CATEGORY'),
@@ -524,8 +531,7 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                       // Preview
                       if (_mediaType == 'image' && _displayFile != null)
                         AspectRatio(
-                          aspectRatio:
-                              _aspectOptions[_selectedRatioIndex].ratio ?? 1.0,
+                          aspectRatio: _aspectOptions[_selectedRatioIndex].ratio ?? 1.0,
                           child: Image.file(
                             _displayFile!,
                             fit: BoxFit.cover,
@@ -534,16 +540,47 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                         )
                       else
                         Container(
-                          height: 200,
                           width: double.infinity,
-                          color: Colors.black12,
-                          child: const Center(
-                            child: Icon(
-                              Icons.videocam_rounded,
-                              size: 64,
-                              color: Colors.black38,
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            border: Border.symmetric(
+                              horizontal: BorderSide(color: Colors.grey.shade200, width: 0.5),
                             ),
                           ),
+                          child: _videoController != null && _videoController!.value.isInitialized
+                              ? GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _videoController!.value.isPlaying
+                                          ? _videoController!.pause()
+                                          : _videoController!.play();
+                                    });
+                                  },
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      AspectRatio(
+                                        aspectRatio: _videoController!.value.aspectRatio,
+                                        child: VideoPlayer(_videoController!),
+                                      ),
+                                      if (!_videoController!.value.isPlaying)
+                                        Container(
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black45,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 40),
+                                        ),
+                                    ],
+                                  ),
+                                )
+                              : const SizedBox(
+                                  height: 200,
+                                  child: Center(
+                                    child: CircularProgressIndicator(color: Colors.white70),
+                                  ),
+                                ),
                         ),
 
                       // Top-right close
@@ -553,6 +590,8 @@ class _CreatePostSheetState extends State<CreatePostSheet> {
                         child: GestureDetector(
                           onTap: () => setState(() {
                             _rawFile = _displayFile = null;
+                            _videoController?.dispose();
+                            _videoController = null;
                           }),
                           child: Container(
                             padding: const EdgeInsets.all(6),

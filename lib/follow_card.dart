@@ -43,8 +43,18 @@ class _FollowCardState extends State<FollowCard> {
   void initState() {
     super.initState();
     final global = GlobalNotifier.instance;
-    _isFollowing =
-        global.followStates.value[widget.userId] ?? widget.initialIsFollowing;
+
+    // ALWAYS trust the server-provided initialIsFollowing on first build.
+    // The cache may contain stale values from previous interactions that
+    // no longer match the database (e.g. user unfollowed via profile page).
+    _isFollowing = widget.initialIsFollowing;
+
+    // Always seed/overwrite the cache with the server-provided state so that
+    // the cache is up-to-date and sibling cards share the correct value.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      global.updateFollowState(widget.userId, widget.initialIsFollowing);
+    });
+
     _followListener = () {
       final next = global.followStates.value[widget.userId];
       if (next != null && next != _isFollowing && mounted) {
@@ -52,6 +62,22 @@ class _FollowCardState extends State<FollowCard> {
       }
     };
     global.followStates.addListener(_followListener);
+  }
+
+  @override
+  void didUpdateWidget(FollowCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.userId != widget.userId ||
+        oldWidget.initialIsFollowing != widget.initialIsFollowing) {
+      // When the parent rebuilds with fresh data, trust the server value again.
+      setState(() {
+        _isFollowing = widget.initialIsFollowing;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        GlobalNotifier.instance
+            .updateFollowState(widget.userId, widget.initialIsFollowing);
+      });
+    }
   }
 
   @override

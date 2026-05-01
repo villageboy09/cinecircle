@@ -5,6 +5,7 @@ require_once __DIR__ . '/../config.php';
 date_default_timezone_set('Asia/Kolkata');
 
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec("SET NAMES utf8mb4");
 $pdo->exec("SET time_zone = '+05:30'");
 
 header("Access-Control-Allow-Origin: *");
@@ -103,7 +104,41 @@ try {
         $stmt->execute([$postId]);
         $comments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        echo json_encode(["status" => "success", "data" => $comments]);
+        echo json_encode(["status" => "success", "data" => $comments], JSON_UNESCAPED_UNICODE);
+    }
+    elseif ($action === 'get_post') {
+        $postId = $_GET['post_id'] ?? '';
+        if (!$postId) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "post_id required"]);
+            exit();
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT 
+                p.id, p.user_id, p.category, p.title, p.description,
+                p.media_url, p.media_type, p.created_at,
+                u.full_name as author_name, u.role_title, u.profile_image_url,
+                (SELECT COUNT(*) FROM feed_likes WHERE post_id = p.id) as likes_count,
+                (SELECT COUNT(*) FROM feed_comments WHERE post_id = p.id) as comments_count,
+                (SELECT COUNT(*) FROM feed_views WHERE post_id = p.id) as views_count,
+                EXISTS(SELECT 1 FROM feed_likes WHERE post_id = p.id AND user_id = ?) as is_liked,
+                EXISTS(SELECT 1 FROM feed_saves WHERE post_id = p.id AND user_id = ?) as is_saved
+            FROM feed_posts p
+            JOIN cinecircle u ON p.user_id = u.id
+            WHERE p.id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$userId, $userId, $postId]);
+        $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$post) {
+            http_response_code(404);
+            echo json_encode(["status" => "error", "message" => "Post not found"]);
+            exit();
+        }
+
+        echo json_encode(["status" => "success", "data" => $post], JSON_UNESCAPED_UNICODE);
     }
     elseif ($action === 'save_post') {
         $postId = $_POST['post_id'] ?? '';
@@ -196,18 +231,111 @@ try {
     elseif ($action === 'report_post') {
         $postId = $_POST['post_id'] ?? '';
         $reason = $_POST['reason'] ?? 'Inappropriate content';
+
         if (!$postId) {
             http_response_code(400);
             echo json_encode(["status" => "error", "message" => "post_id required"]);
             exit();
         }
 
+        // Whitelist allowed reasons
+        $allowedReasons = [
+            'Inappropriate content',
+            'Spam or misleading',
+            'Harassment or bullying',
+            'Fake profile or impersonation',
+            'Violence or dangerous content',
+            'Other',
+        ];
+        if (!in_array($reason, $allowedReasons)) {
+            $reason = 'Inappropriate content';
+        }
+
+        // Check if already reported
+        $chkStmt = $pdo->prepare("SELECT id FROM feed_reports WHERE post_id = ? AND user_id = ? LIMIT 1");
+        $chkStmt->execute([$postId, $userId]);
+        if ($chkStmt->fetch()) {
+            echo json_encode(["status" => "already_reported", "message" => "You have already reported this post."]);
+            exit();
+        }
+
+        // Insert (IGNORE handles any race-condition duplicates)
         $insStmt = $pdo->prepare(
-            "INSERT INTO feed_reports (post_id, user_id, reason) VALUES (?, ?, ?)"
+            "INSERT IGNORE INTO feed_reports (post_id, user_id, reason) VALUES (?, ?, ?)"
         );
         $insStmt->execute([$postId, $userId, $reason]);
 
-        echo json_encode(["status" => "success", "message" => "Report submitted"]); 
+        echo json_encode(["status" => "success", "message" => "Report submitted. Thank you for keeping CineCircle safe."]);
+    }
+    elseif ($action === 'check_report') {
+        // Check whether the current user has already reported a post
+        $postId = $_GET['post_id'] ?? '';
+        if (!$postId) {
+            echo json_encode(["status" => "error", "message" => "post_id required"]);
+            exit();
+        }
+        $chkStmt = $pdo->prepare("SELECT id FROM feed_reports WHERE post_id = ? AND user_id = ? LIMIT 1");
+        $chkStmt->execute([$postId, $userId]);
+        $reported = (bool)$chkStmt->fetch();
+        echo json_encode(["status" => "success", "already_reported" => $reported]);
+    }
+    elseif ($action === 'search') {
+        $query = trim($_GET['query'] ?? '');
+        if (!$query) {
+            echo json_encode(["status" => "success", "users" => [], "posts" => []]);
+            exit();
+        }
+
+        $searchQuery = "%$query%";
+
+        // 1. Search Users
+        $userStmt = $pdo->prepare("
+            SELECT id, full_name, profile_image_url, role_title, city,
+            EXISTS(SELECT 1 FROM user_follows WHERE follower_id = ? AND following_id = cinecircle.id) as is_following
+            FROM cinecircle
+            WHERE (full_name LIKE ? OR role_title LIKE ? OR city LIKE ?)
+            AND id != ?
+            LIMIT 10
+        ");
+        $userStmt->execute([$userId, $searchQuery, $searchQuery, $searchQuery, $userId]);
+        $users = $userStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 2. Search Posts
+        $postStmt = $pdo->prepare("
+            SELECT 
+                p.id, p.user_id, p.category, p.title, p.description,
+                p.media_url, p.media_type, p.created_at,
+                u.full_name as author_name, u.role_title, u.profile_image_url,
+                (SELECT COUNT(*) FROM feed_likes WHERE post_id = p.id) as likes_count,
+                (SELECT COUNT(*) FROM feed_comments WHERE post_id = p.id) as comments_count,
+                (SELECT COUNT(*) FROM feed_views WHERE post_id = p.id) as views_count,
+                EXISTS(SELECT 1 FROM feed_likes WHERE post_id = p.id AND user_id = ?) as is_liked,
+                EXISTS(SELECT 1 FROM feed_saves WHERE post_id = p.id AND user_id = ?) as is_saved
+            FROM feed_posts p
+            JOIN cinecircle u ON p.user_id = u.id
+            WHERE (p.title LIKE ? OR p.description LIKE ? OR p.category LIKE ?)
+            ORDER BY p.created_at DESC
+            LIMIT 20
+        ");
+        $postStmt->execute([$userId, $userId, $searchQuery, $searchQuery, $searchQuery]);
+        $posts = $postStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode(["status" => "success", "users" => $users, "posts" => $posts], JSON_UNESCAPED_UNICODE);
+    }
+    elseif ($action === 'get_new_users') {
+        // Get users that the current user is not following
+        $stmt = $pdo->prepare("
+            SELECT id, full_name, profile_image_url, role_title, city, 0 as is_following
+            FROM cinecircle
+            WHERE id != ?
+            AND id NOT IN (SELECT following_id FROM user_follows WHERE follower_id = ?)
+            ORDER BY created_at DESC
+            LIMIT 15
+        ");
+        $stmt->execute([$userId, $userId]);
+        $newUsers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode(["status" => "success", "data" => $newUsers], JSON_UNESCAPED_UNICODE);
     }
     elseif ($action === 'get_saved_posts') {
         $stmt = $pdo->prepare("
@@ -229,7 +357,7 @@ try {
         $stmt->execute([$userId, $userId]);
         $savedPosts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        echo json_encode(["status" => "success", "data" => $savedPosts]);
+        echo json_encode(["status" => "success", "data" => $savedPosts], JSON_UNESCAPED_UNICODE);
     }
     else {
         http_response_code(400);

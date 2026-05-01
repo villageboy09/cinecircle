@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -218,21 +218,28 @@ class _TriviaScreenState extends State<TriviaScreen> {
               Divider(color: Colors.grey.shade300, height: 1),
               const SizedBox(height: 32),
 
-              // Category Cards
+              // Category Grid
               if (_isLoading)
-                ...[_buildLoadingCard(), const SizedBox(height: 16), _buildLoadingCard(), const SizedBox(height: 16), _buildLoadingCard()]
+                _buildLoadingGrid()
               else if (_categories.isEmpty)
                 const Center(child: Text('No categories yet', style: TextStyle(fontFamily: 'Google Sans', color: Colors.black54)))
               else
-                ..._categories.asMap().entries.map((entry) {
-                  final cat = entry.value;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: _buildCategoryCard(cat),
-                  );
-                }),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: 0.85,
+                  ),
+                  itemCount: _categories.length,
+                  itemBuilder: (context, index) {
+                    return _buildCategoryGridItem(_categories[index]);
+                  },
+                ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
 
               // Daily Bonus Block
               if (!_isLoading && _dailyChallenge != null)
@@ -273,50 +280,95 @@ class _TriviaScreenState extends State<TriviaScreen> {
     );
   }
 
-  Widget _buildCategoryCard(Map<String, dynamic> cat) {
+  Widget _buildLoadingGrid() {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 0.85,
+      ),
+      itemCount: 4,
+      itemBuilder: (context, index) => _buildLoadingCard(),
+    );
+  }
+
+  Widget _buildCategoryGridItem(Map<String, dynamic> cat) {
     final iconData = _iconMap[cat['icon_name']] ?? Icons.quiz;
     final hasImage = cat['image_url'] != null && (cat['image_url'] as String).isNotEmpty;
     final credits = cat['credits_reward']?.toString() ?? '0';
 
-    // Find challenge matching this category
     final linkedChallenges = _challenges.where((c) => c['category_name'] == cat['name']).toList();
 
     return GestureDetector(
       onTap: linkedChallenges.isNotEmpty ? () => _openChallenge(linkedChallenges.first) : null,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black),
+          border: Border.all(color: Colors.grey.shade300),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Icon or Image
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: 56,
-                height: 56,
-                color: Colors.grey.shade100,
-                child: hasImage
-                    ? Image.network(cat['image_url'], fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Icon(iconData, color: Colors.black87, size: 28))
-                    : Icon(iconData, color: Colors.black87, size: 28),
+            // Image stuck to top
+            Expanded(
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+                child: Container(
+                  width: double.infinity,
+                  color: Colors.grey.shade100,
+                  child: hasImage
+                      ? Image.network(cat['image_url'], fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => Icon(iconData, color: Colors.black45, size: 40))
+                      : Icon(iconData, color: Colors.black45, size: 40),
+                ),
               ),
             ),
-            const SizedBox(width: 20),
-            Expanded(
+            Padding(
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(cat['name'] ?? '', style: const TextStyle(fontFamily: 'Google Sans', fontSize: 18, fontWeight: FontWeight.w500, color: Colors.black)),
+                  Text(
+                    cat['name'] ?? '',
+                    style: const TextStyle(
+                      fontFamily: 'Google Sans',
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   const SizedBox(height: 4),
-                  Text('Estimated credits: +$credits', style: const TextStyle(fontFamily: 'Google Sans', fontSize: 14, color: Colors.black87)),
+                  Row(
+                    children: [
+                      const Icon(Icons.copyright, size: 12, color: Colors.black54),
+                      const SizedBox(width: 4),
+                      Text(
+                        '+$credits',
+                        style: const TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 12,
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.black54),
           ],
         ),
       ),
@@ -371,9 +423,15 @@ class _TriviaScreenState extends State<TriviaScreen> {
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: Text(
-                      isCompleted ? 'Completed Ô£ô' : 'Start Trivia (+$credits credits)',
-                      style: const TextStyle(fontFamily: 'Google Sans', fontSize: 16, fontWeight: FontWeight.w600),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          isCompleted ? 'Completed ' : 'Start Trivia (+$credits credits)',
+                          style: const TextStyle(fontFamily: 'Google Sans', fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        if (isCompleted) const Icon(Icons.check_circle_outline, size: 18, color: Colors.white),
+                      ],
                     ),
                   ),
                 ),

@@ -311,24 +311,30 @@ class _SocialRedeemRewardsScreenState extends State<SocialRedeemRewardsScreen> {
         ),
         centerTitle: true,
         actions: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 400),
-            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              color: Colors.black,
               borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: Row(
               children: [
-                const Icon(Icons.copyright, size: 16, color: Colors.black87),
-                const SizedBox(width: 4),
+                const Icon(Icons.copyright, size: 16, color: Colors.white),
+                const SizedBox(width: 6),
                 Text(
                   '$_balance Credits',
                   style: const TextStyle(
                     fontFamily: 'Google Sans',
-                    color: Colors.black87,
-                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
                 ),
@@ -676,12 +682,14 @@ class _SocialRedeemRewardsScreenState extends State<SocialRedeemRewardsScreen> {
                               decoration: BoxDecoration(
                                 color: Colors.red.shade50,
                                 borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade100),
                               ),
                               child: Text(
-                                'Out of stock',
+                                'OUT OF STOCK',
                                 style: TextStyle(
                                   fontFamily: 'Google Sans',
-                                  fontSize: 10,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
                                   color: Colors.red.shade700,
                                 ),
                               ),
@@ -696,22 +704,26 @@ class _SocialRedeemRewardsScreenState extends State<SocialRedeemRewardsScreen> {
                               decoration: BoxDecoration(
                                 color: Colors.orange.shade50,
                                 borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.orange.shade100),
                               ),
                               child: Text(
-                                'Only $stockQty left!',
+                                'ONLY $stockQty LEFT!',
                                 style: TextStyle(
                                   fontFamily: 'Google Sans',
-                                  fontSize: 10,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
                                   color: Colors.orange.shade700,
                                 ),
                               ),
                             ),
                           ] else if (item['stock_label'] != null &&
                               (item['stock_label'] as String).isNotEmpty) ...[
-                            Text(
-                              ' • ',
-                              style: TextStyle(color: Colors.grey.shade500),
+                            const SizedBox(width: 6),
+                            const Text(
+                              '\u2022',
+                              style: TextStyle(color: Colors.grey, fontSize: 10),
                             ),
+                            const SizedBox(width: 6),
                             Text(
                               item['stock_label'],
                               style: TextStyle(

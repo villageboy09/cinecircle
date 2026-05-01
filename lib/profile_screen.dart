@@ -12,6 +12,8 @@ import 'welcome_screen.dart';
 import 'social_cine_credits_screen.dart';
 import 'followers_screen.dart';
 import 'global_notifier.dart';
+import 'post_detail_screen.dart';
+import 'stories_widgets.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -36,6 +38,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _socialBalance = 0;
   bool _isPostsLoading = false;
   bool _isSavedPostsLoading = false;
+  bool _hasStories = false;
+  bool _hasUnviewed = false;
 
   @override
   void initState() {
@@ -80,6 +84,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _loadSocialCredits(mobile);
             _loadUserPosts(mobile);
             _loadSavedPosts(mobile);
+            _checkStories();
           }
           return;
         }
@@ -101,6 +106,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadSocialCredits(mobile);
     _loadUserPosts(mobile);
     _loadSavedPosts(mobile);
+    _checkStories();
+  }
+
+  Future<void> _checkStories() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mobile = prefs.getString('user_phone') ?? '';
+      final response = await http.get(
+        Uri.parse('https://team.cropsync.in/cine_circle/homefeed_api.php?mobile_number=$mobile&limit=1'),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          setState(() {
+            _hasStories = data['data']['current_user_has_stories'] == true;
+            _hasUnviewed = data['data']['current_user_has_unviewed'] == true;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadUserPosts(String mobile) async {
@@ -203,569 +228,250 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: RefreshIndicator(
           color: Colors.black,
           onRefresh: _loadUserData,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 20),
-                // Header
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade200,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.grey.shade300,
-                          width: 2,
-                        ),
-                        image:
-                            _profileData != null &&
-                                _profileData!['profile_image_url'] != null &&
-                                _profileData!['profile_image_url'].isNotEmpty
-                            ? DecorationImage(
-                                image: CachedNetworkImageProvider(
-                                  _profileData!['profile_image_url'],
-                                ),
-                                fit: BoxFit.cover,
-                              )
-                            : null,
-                      ),
-                      child:
-                          (_profileData == null ||
-                              _profileData!['profile_image_url'] == null ||
-                              _profileData!['profile_image_url'].isEmpty)
-                          ? const Icon(
-                              Icons.person,
-                              size: 40,
-                              color: Colors.grey,
-                            )
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          // Left Side
-                          Flexible(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        _userName,
-                                        style: const TextStyle(
-                                          fontFamily: 'Google Sans',
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.black,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    const Icon(
-                                      Icons.verified,
-                                      color: Colors.black,
-                                      size: 16,
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _accountType,
-                                  style: const TextStyle(
-                                    fontFamily: 'Google Sans',
-                                    fontSize: 14,
-                                    color: Colors.black87,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 24),
-                          // Right Side
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.location_on_outlined,
-                                    size: 14,
-                                    color: Colors.grey.shade700,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _profileData?['city']?.isNotEmpty == true
-                                        ? _profileData!['city']!
-                                        : 'Not specified',
-                                    style: TextStyle(
-                                      fontFamily: 'Google Sans',
-                                      fontSize: 12,
-                                      color: Colors.grey.shade700,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              if (_userPhone.isNotEmpty)
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.phone_outlined,
-                                      size: 14,
-                                      color: Colors.grey.shade700,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      _userPhone,
-                                      style: TextStyle(
-                                        fontFamily: 'Google Sans',
-                                        fontSize: 12,
-                                        color: Colors.grey.shade700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                // Edit Profile Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      final result = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const EditProfileScreen(),
-                        ),
-                      );
-                      if (result == true) {
-                        _loadUserData();
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Colors.grey.shade300),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: const Text(
-                      'Edit Profile',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+          child: DefaultTabController(
+            length: 3,
+            child: NestedScrollView(
+              headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 20),
+                        _buildProfileHeader(),
+                        const SizedBox(height: 24),
+                        _buildEditProfileButton(),
+                        const SizedBox(height: 24),
+                        _buildStatsAndCredits(),
+                        const SizedBox(height: 20),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
-                // Stats + Credits
-                Row(
-                  children: [
-                    Expanded(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          GestureDetector(
-                            onTap: () {
-                              if (_profileData?['id'] == null) return;
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => FollowersScreen(
-                                    targetUserId: _profileData!['id']
-                                        .toString(),
-                                    displayName: _userName,
-                                    initialTab: 0,
-                                  ),
-                                ),
-                              ).then((_) => _loadFollowCounts(_userPhone));
-                            },
-                            child: ValueListenableBuilder<int>(
-                              valueListenable:
-                                  GlobalNotifier.instance.followersCount,
-                              builder: (context, value, _) => _buildStat(
-                                '$value',
-                                'Followers',
-                                Icons.people_outline,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            height: 40,
-                            width: 1,
-                            color: Colors.grey.shade300,
-                          ),
-                          GestureDetector(
-                            onTap: () {
-                              if (_profileData?['id'] == null) return;
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => FollowersScreen(
-                                    targetUserId: _profileData!['id']
-                                        .toString(),
-                                    displayName: _userName,
-                                    initialTab: 1,
-                                  ),
-                                ),
-                              ).then((_) => _loadFollowCounts(_userPhone));
-                            },
-                            child: ValueListenableBuilder<int>(
-                              valueListenable:
-                                  GlobalNotifier.instance.followingCount,
-                              builder: (context, value, _) => _buildStat(
-                                '$value',
-                                'Following',
-                                Icons.person_outline,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                const SocialCineCreditsScreen(),
-                          ),
-                        );
-                      },
-                      child: _buildCreditsIsland(compact: true),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'About',
-                              style: TextStyle(
-                                fontFamily: 'Google Sans',
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _profileData?['bio']?.isNotEmpty == true
-                                  ? _profileData!['bio']!
-                                  : 'Write a bit about yourself and your journey.',
-                              maxLines: 5,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontFamily: 'Google Sans',
-                                fontSize: 13,
-                                color: Colors.black87,
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Posts & Saved',
-                              style: TextStyle(
-                                fontFamily: 'Google Sans',
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.grid_on_outlined,
-                                  size: 16,
-                                  color: Colors.black87,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _isPostsLoading
-                                      ? '...'
-                                      : '${_postsList.length} Posts',
-                                  style: const TextStyle(
-                                    fontFamily: 'Google Sans',
-                                    fontSize: 13,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.bookmark_border,
-                                  size: 16,
-                                  color: Colors.black87,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _isSavedPostsLoading
-                                      ? '...'
-                                      : '${_savedPostsList.length} Saved',
-                                  style: const TextStyle(
-                                    fontFamily: 'Google Sans',
-                                    fontSize: 13,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                DefaultTabController(
-                  length: 2,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TabBar(
-                        labelColor: Colors.black,
-                        unselectedLabelColor: Colors.grey.shade500,
-                        indicatorColor: Colors.black,
-                        tabs: const [
-                          Tab(text: 'Posts'),
-                          Tab(text: 'Saved'),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        height: 420,
-                        child: TabBarView(
-                          children: [
-                            _buildPostGrid(
-                              posts: _postsList,
-                              isLoading: _isPostsLoading,
-                              emptyText:
-                                  'No posts yet. Your posts will appear here.',
-                            ),
-                            _buildPostGrid(
-                              posts: _savedPostsList,
-                              isLoading: _isSavedPostsLoading,
-                              emptyText: 'No saved posts yet.',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Divider(color: Colors.grey.shade200),
-                const SizedBox(height: 16),
-                // Featured Reel Divider & Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Featured Reel',
-                      style: TextStyle(
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _SliverAppBarDelegate(
+                    TabBar(
+                      labelColor: Colors.black,
+                      unselectedLabelColor: Colors.grey.shade500,
+                      indicatorColor: Colors.black,
+                      indicatorWeight: 3,
+                      labelStyle: const TextStyle(
                         fontFamily: 'Google Sans',
-                        fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.black,
+                        fontSize: 15,
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.add_circle_outline,
-                        color: Colors.black,
-                      ),
-                      onPressed: () => _showAddReelBottomSheet(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 160,
-                  child: _reelsList.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'No featured reels added.',
-                            style: TextStyle(fontFamily: 'Google Sans'),
-                          ),
-                        )
-                      : ListView.separated(
-                          physics: const BouncingScrollPhysics(),
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _reelsList.length,
-                          separatorBuilder: (context, index) =>
-                              const SizedBox(width: 16),
-                          itemBuilder: (context, index) {
-                            return _buildReelCard(_reelsList[index]);
-                          },
-                        ),
-                ),
-                const SizedBox(height: 16),
-                Divider(color: Colors.grey.shade200),
-                const SizedBox(height: 16),
-                // Credits Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Credits',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.add_circle_outline,
-                        color: Colors.black,
-                      ),
-                      onPressed: () => _showAddCreditBottomSheet(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (_creditsList.isEmpty)
-                  const Text(
-                    'No credits added yet.',
-                    style: TextStyle(fontFamily: 'Google Sans'),
-                  ),
-                ..._creditsList.map((c) {
-                  final title = c['project_title'] ?? '';
-                  final role = c['role'] ?? '';
-                  final year = c['year'] != null ? ' (${c['year']})' : '';
-                  return _buildCreditItem('$role - "$title"$year');
-                }),
-                const SizedBox(height: 16),
-                Divider(color: Colors.grey.shade200),
-                const SizedBox(height: 16),
-                // Skills Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Skills',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.add_circle_outline,
-                        color: Colors.black,
-                      ),
-                      onPressed: () => _showAddSkillBottomSheet(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _skillsList.isEmpty
-                    ? const Text(
-                        'No skills added yet.',
-                        style: TextStyle(fontFamily: 'Google Sans'),
-                      )
-                    : Wrap(
-                        spacing: 8,
-                        runSpacing: 12,
-                        children: _skillsList
-                            .map((s) => _buildSkillChip(s['skill_name'] ?? ''))
-                            .toList(),
-                      ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () => _showLogoutBottomSheet(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade50,
-                      foregroundColor: Colors.red,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Colors.red.shade200),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: const Text(
-                      'Log Out',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      tabs: const [
+                        Tab(text: 'About'),
+                        Tab(text: 'Posts'),
+                        Tab(text: 'Saved'),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 48),
               ],
+              body: TabBarView(
+                children: [
+                  _buildAboutTabContent(),
+                  _buildPostGrid(
+                    posts: _postsList,
+                    isLoading: _isPostsLoading,
+                    emptyText: 'No posts yet.',
+                  ),
+                  _buildPostGrid(
+                    posts: _savedPostsList,
+                    isLoading: _isSavedPostsLoading,
+                    emptyText: 'No saved posts.',
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildProfileHeader() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        UserAvatarWithStory(
+          userId: _profileData?['id'] ?? '',
+          profileImageUrl: _profileData?['profile_image_url'] ?? '',
+          radius: 36,
+          hasStories: _hasStories,
+          hasUnviewed: _hasUnviewed,
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            _userName,
+                            style: const TextStyle(
+                              fontFamily: 'Google Sans',
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.verified, color: Colors.black, size: 16),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _accountType,
+                      style: const TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 14,
+                        color: Colors.black87,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 24),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.location_on_outlined, size: 14, color: Colors.grey.shade700),
+                      const SizedBox(width: 4),
+                      Text(
+                        _profileData?['city']?.isNotEmpty == true ? _profileData!['city']! : 'Not specified',
+                        style: TextStyle(fontFamily: 'Google Sans', fontSize: 12, color: Colors.grey.shade700),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  if (_userPhone.isNotEmpty)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.phone_outlined, size: 14, color: Colors.grey.shade700),
+                        const SizedBox(width: 4),
+                        Text(
+                          _userPhone,
+                          style: TextStyle(fontFamily: 'Google Sans', fontSize: 12, color: Colors.grey.shade700),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEditProfileButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: ElevatedButton(
+        onPressed: () async {
+          final result = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const EditProfileScreen()),
+          );
+          if (result == true) _loadUserData();
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.grey.shade300),
+          ),
+          elevation: 0,
+        ),
+        child: const Text(
+          'Edit Profile',
+          style: TextStyle(fontFamily: 'Google Sans', fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsAndCredits() {
+    return Row(
+      children: [
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              GestureDetector(
+                onTap: () {
+                  if (_profileData?['id'] == null) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => FollowersScreen(
+                        targetUserId: _profileData!['id'].toString(),
+                        displayName: _userName,
+                        initialTab: 0,
+                      ),
+                    ),
+                  ).then((_) => _loadFollowCounts(_userPhone));
+                },
+                child: ValueListenableBuilder<int>(
+                  valueListenable: GlobalNotifier.instance.followersCount,
+                  builder: (context, value, _) => _buildStat('$value', 'Followers', Icons.people_outline),
+                ),
+              ),
+              Container(height: 40, width: 1, color: Colors.grey.shade300),
+              GestureDetector(
+                onTap: () {
+                  if (_profileData?['id'] == null) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => FollowersScreen(
+                        targetUserId: _profileData!['id'].toString(),
+                        displayName: _userName,
+                        initialTab: 1,
+                      ),
+                    ),
+                  ).then((_) => _loadFollowCounts(_userPhone));
+                },
+                child: ValueListenableBuilder<int>(
+                  valueListenable: GlobalNotifier.instance.followingCount,
+                  builder: (context, value, _) => _buildStat('$value', 'Following', Icons.person_outline),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        GestureDetector(
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => const SocialCineCreditsScreen()));
+          },
+          child: _buildCreditsIsland(compact: true),
+        ),
+      ],
     );
   }
 
@@ -1392,6 +1098,169 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _buildAboutTabContent() {
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'About',
+                  style: TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _profileData?['bio']?.isNotEmpty == true
+                      ? _profileData!['bio']!
+                      : 'Jack of all trades',
+                  style: const TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontSize: 14,
+                    color: Colors.black87,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // Featured Reel
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Featured Reel',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, size: 20),
+                      onPressed: () => _showAddReelBottomSheet(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 160,
+                  child: _reelsList.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No featured reels.',
+                            style: TextStyle(
+                              fontFamily: 'Google Sans',
+                              color: Colors.grey.shade500,
+                              fontSize: 13,
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          physics: const BouncingScrollPhysics(),
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _reelsList.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 12),
+                          itemBuilder: (context, index) {
+                            return _buildReelCard(_reelsList[index]);
+                          },
+                        ),
+                ),
+                const SizedBox(height: 24),
+                // Skills
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Skills',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, size: 20),
+                      onPressed: () => _showAddSkillBottomSheet(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _skillsList.isEmpty
+                    ? Text(
+                        'No skills added.',
+                        style: TextStyle(
+                          fontFamily: 'Google Sans',
+                          color: Colors.grey.shade500,
+                          fontSize: 13,
+                        ),
+                      )
+                    : Wrap(
+                        spacing: 8,
+                        runSpacing: 10,
+                        children: _skillsList
+                            .map((s) => _buildSkillChip(s['skill_name'] ?? ''))
+                            .toList(),
+                      ),
+                const SizedBox(height: 24),
+                // Credits
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Credits',
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, size: 20),
+                      onPressed: () => _showAddCreditBottomSheet(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (_creditsList.isEmpty)
+                  Text(
+                    'No credits added.',
+                    style: TextStyle(
+                      fontFamily: 'Google Sans',
+                      color: Colors.grey.shade500,
+                      fontSize: 13,
+                    ),
+                  ),
+                ..._creditsList.map((c) {
+                  final role = c['role'] ?? 'Role';
+                  final title = c['project_title'] ?? 'Project';
+                  final year = c['year'] != null ? ' (${c['year']})' : '';
+                  return _buildCreditItem('$role - "$title"$year');
+                }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+          _buildLogoutButton(),
+          const SizedBox(height: 48),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPostGrid({
     required List<dynamic> posts,
     required bool isLoading,
@@ -1417,103 +1286,150 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    return GridView.builder(
-      padding: EdgeInsets.zero,
-      physics: const BouncingScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.78,
-      ),
-      itemCount: posts.length,
-      itemBuilder: (context, index) {
-        final post = posts[index] as Map<String, dynamic>;
-        final mediaUrl = (post['media_url'] ?? '').toString();
-        final hasMedia = mediaUrl.isNotEmpty;
-        final isVideo = post['media_type'] == 'video';
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.grey.shade200),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(18),
+    return Column(
+      children: [
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(20),
+            physics: const BouncingScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 0.78,
+            ),
+            itemCount: posts.length,
+            itemBuilder: (context, index) {
+              final post = posts[index] as Map<String, dynamic>;
+              final mediaUrl = (post['media_url'] ?? '').toString();
+              final hasMedia = mediaUrl.isNotEmpty;
+              final isVideo = post['media_type'] == 'video';
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PostDetailScreen(post: post),
+                    ),
+                  );
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: Colors.grey.shade200),
                   ),
-                  child: Container(
-                    width: double.infinity,
-                    color: Colors.grey.shade100,
-                    child: hasMedia
-                        ? isVideo
-                              ? Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Container(color: Colors.black12),
-                                    const Center(
-                                      child: Icon(
-                                        Icons.play_circle_fill,
-                                        size: 54,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : CachedNetworkImage(
-                                  imageUrl: mediaUrl,
-                                  fit: BoxFit.cover,
-                                )
-                        : const Center(
-                            child: Icon(
-                              Icons.article_outlined,
-                              size: 42,
-                              color: Colors.black45,
-                            ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(18),
                           ),
+                          child: Container(
+                            width: double.infinity,
+                            color: Colors.grey.shade100,
+                            child: hasMedia
+                                ? isVideo
+                                    ? Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          Container(color: Colors.black12),
+                                          const Center(
+                                            child: Icon(
+                                              Icons.play_circle_fill,
+                                              size: 54,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : CachedNetworkImage(
+                                        imageUrl: mediaUrl,
+                                        fit: BoxFit.cover,
+                                      )
+                                : const Center(
+                                    child: Icon(
+                                      Icons.article_outlined,
+                                      size: 42,
+                                      color: Colors.black45,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (post['title'] ?? '').toString().isNotEmpty
+                                  ? post['title'].toString()
+                                  : (post['description'] ?? '').toString().isNotEmpty
+                                  ? post['description'].toString()
+                                  : 'Untitled post',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${post['likes_count'] ?? 0} likes · ${post['comments_count'] ?? 0} comments',
+                              style: TextStyle(
+                                fontFamily: 'Google Sans',
+                                fontSize: 11,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      (post['title'] ?? '').toString().isNotEmpty
-                          ? post['title'].toString()
-                          : (post['description'] ?? '').toString().isNotEmpty
-                          ? post['description'].toString()
-                          : 'Untitled post',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${post['likes_count'] ?? 0} likes · ${post['comments_count'] ?? 0} comments',
-                      style: TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 11,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              );
+            },
           ),
-        );
-      },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+          child: _buildLogoutButton(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: ElevatedButton(
+        onPressed: () => _showLogoutBottomSheet(),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.red.shade50,
+          foregroundColor: Colors.red,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: Colors.red.shade100, width: 1.5),
+          ),
+          elevation: 0,
+        ),
+        child: const Text(
+          'Log Out',
+          style: TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
     );
   }
 
@@ -1614,6 +1530,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
+class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
+  _SliverAppBarDelegate(this._tabBar);
+
+  final TabBar _tabBar;
+
+  @override
+  double get minExtent => _tabBar.preferredSize.height;
+  @override
+  double get maxExtent => _tabBar.preferredSize.height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Container(
+      color: Colors.white,
+      child: _tabBar,
+    );
+  }
+
+  @override
+  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) {
+    return false;
+  }
+}
+
 class ReelThumbnail extends StatefulWidget {
   final String videoUrl;
   const ReelThumbnail({super.key, required this.videoUrl});
@@ -1630,17 +1574,15 @@ class _ReelThumbnailState extends State<ReelThumbnail> {
   void initState() {
     super.initState();
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize()
-          .then((_) {
-            if (mounted) {
-              setState(() {
-                _initialized = true;
-              });
-            }
-          })
-          .catchError((e) {
-            // Ignored, thumbnail just remains grey wrapper
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() {
+            _initialized = true;
           });
+        }
+      }).catchError((e) {
+        // Ignored, thumbnail just remains grey wrapper
+      });
   }
 
   @override

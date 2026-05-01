@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'chat_screen.dart';
 import 'followers_screen.dart';
 import 'global_notifier.dart';
+import 'post_detail_screen.dart';
 
 const _socialApiPub = 'https://team.cropsync.in/cine_circle/social_api.php';
 
@@ -26,12 +27,15 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   bool _isFollowing = false;
   bool _isTogglingFollow = false;
   String? _currentUserId;
+  List<dynamic> _posts = [];
+  bool _isPostsLoading = false;
 
   @override
   void initState() {
     super.initState();
     _loadCurrentUserId();
     _fetchProfile();
+    _fetchUserPosts();
   }
 
   Future<void> _loadCurrentUserId() async {
@@ -140,6 +144,29 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     } catch (e) {
       debugPrint('openChat error: $e');
     }
+  }
+
+  Future<void> _fetchUserPosts() async {
+    setState(() => _isPostsLoading = true);
+    try {
+      final mobile = await _getMobile();
+      final res = await http.get(
+        Uri.parse(
+          '$_socialApiPub?action=get_user_posts&mobile_number=$mobile&target_user_id=${widget.userId}',
+        ),
+      );
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['status'] == 'success' && mounted) {
+          setState(() {
+            _posts = data['data'] ?? [];
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('fetchUserPosts error: $e');
+    }
+    setState(() => _isPostsLoading = false);
   }
 
   @override
@@ -397,8 +424,66 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             ],
           ),
           Divider(height: 32, color: Colors.grey.shade200),
-          // — Bio —
-          if ((p['bio'] ?? '').isNotEmpty) ...[
+          const SizedBox(height: 24),
+          // Tabs & Feed
+          DefaultTabController(
+            length: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TabBar(
+                  labelColor: Colors.black,
+                  unselectedLabelColor: Colors.grey.shade500,
+                  indicatorColor: Colors.black,
+                  indicatorWeight: 3,
+                  labelStyle: const TextStyle(
+                    fontFamily: 'Google Sans',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                  tabs: const [
+                    Tab(text: 'About'),
+                    Tab(text: 'Posts'),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 520,
+                  child: TabBarView(
+                    children: [
+                      _buildAboutTabContent(p, reels, skills, credits),
+                      _buildPostsTabContent(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 48),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAboutTabContent(
+    Map<String, dynamic> p,
+    List<dynamic> reels,
+    List<dynamic> skills,
+    List<dynamic> credits,
+  ) {
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             const Text(
               'About',
               style: TextStyle(
@@ -407,70 +492,157 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Text(
-              p['bio'],
+              p['bio']?.isNotEmpty == true ? p['bio'] : 'Jack of all trades',
               style: const TextStyle(
                 fontFamily: 'Google Sans',
-                fontSize: 15,
+                fontSize: 14,
                 color: Colors.black87,
                 height: 1.5,
               ),
             ),
-            Divider(height: 32, color: Colors.grey.shade200),
-          ],
-          // — Skills —
-          if (skills.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            // Featured Reel
+            const Text(
+              'Featured Reel',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 160,
+              child:
+                  reels.isEmpty
+                      ? Center(
+                        child: Text(
+                          'No featured reels.',
+                          style: TextStyle(
+                            fontFamily: 'Google Sans',
+                            color: Colors.grey.shade500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      )
+                      : ListView.separated(
+                        physics: const BouncingScrollPhysics(),
+                        scrollDirection: Axis.horizontal,
+                        itemCount: reels.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 12),
+                        itemBuilder: (context, index) {
+                          final r = reels[index];
+                          final hasThumbnail =
+                              (r['thumbnail_url'] ?? '').isNotEmpty;
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              width: 160,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade200,
+                                image:
+                                    hasThumbnail
+                                        ? DecorationImage(
+                                          image: NetworkImage(
+                                            r['thumbnail_url'],
+                                          ),
+                                          fit: BoxFit.cover,
+                                        )
+                                        : null,
+                              ),
+                              alignment: Alignment.bottomLeft,
+                              padding: const EdgeInsets.all(8),
+                              child: Text(
+                                r['title'] ?? '',
+                                style: TextStyle(
+                                  fontFamily: 'Google Sans',
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color:
+                                      hasThumbnail
+                                          ? Colors.white
+                                          : Colors.black87,
+                                ),
+                                maxLines: 2,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+            ),
+            const SizedBox(height: 24),
+            // Skills
             const Text(
               'Skills',
               style: TextStyle(
                 fontFamily: 'Google Sans',
-                fontSize: 18,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: skills
-                  .map<Widget>(
-                    (s) => Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: Text(
-                        s.toString(),
-                        style: const TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-            Divider(height: 32, color: Colors.grey.shade200),
-          ],
-          // — Credits —
-          if (credits.isNotEmpty) ...[
+            skills.isEmpty
+                ? Text(
+                  'No skills added.',
+                  style: TextStyle(
+                    fontFamily: 'Google Sans',
+                    color: Colors.grey.shade500,
+                    fontSize: 13,
+                  ),
+                )
+                : Wrap(
+                  spacing: 8,
+                  runSpacing: 10,
+                  children:
+                      skills
+                          .map(
+                            (s) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 7,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: Text(
+                                s.toString(),
+                                style: const TextStyle(
+                                  fontFamily: 'Google Sans',
+                                  fontSize: 13,
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                ),
+            const SizedBox(height: 24),
+            // Credits
             const Text(
               'Credits',
               style: TextStyle(
                 fontFamily: 'Google Sans',
-                fontSize: 18,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 12),
-            ...credits.map<Widget>(
-              (c) => Padding(
+            if (credits.isEmpty)
+              Text(
+                'No credits added.',
+                style: TextStyle(
+                  fontFamily: 'Google Sans',
+                  color: Colors.grey.shade500,
+                  fontSize: 13,
+                ),
+              ),
+            ...credits.map((c) {
+              return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
                   children: [
@@ -492,65 +664,116 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     ),
                   ],
                 ),
-              ),
-            ),
-            Divider(height: 32, color: Colors.grey.shade200),
+              );
+            }),
           ],
-          // — Reels —
-          if (reels.isNotEmpty) ...[
-            const Text(
-              'Featured Reels',
-              style: TextStyle(
-                fontFamily: 'Google Sans',
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 120,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: reels.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (_, i) {
-                  final r = reels[i];
-                  final hasThumbnail = (r['thumbnail_url'] ?? '').isNotEmpty;
-                  return ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: 160,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade200,
-                        image: hasThumbnail
-                            ? DecorationImage(
-                                image: NetworkImage(r['thumbnail_url']),
-                                fit: BoxFit.cover,
-                              )
-                            : null,
-                      ),
-                      alignment: Alignment.bottomLeft,
-                      padding: const EdgeInsets.all(8),
-                      child: Text(
-                        r['title'] ?? '',
-                        style: TextStyle(
-                          fontFamily: 'Google Sans',
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: hasThumbnail ? Colors.white : Colors.black87,
-                        ),
-                        maxLines: 2,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-          const SizedBox(height: 48),
-        ],
+        ),
       ),
     );
+  }
+
+  Widget _buildPostsTabContent() {
+    return _isPostsLoading
+        ? const Center(
+          child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2),
+        )
+        : _posts.isEmpty
+        ? Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Text(
+              'No posts yet.',
+              style: TextStyle(
+                fontFamily: 'Google Sans',
+                color: Colors.grey.shade500,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        )
+        : GridView.builder(
+          shrinkWrap: true,
+          physics: const BouncingScrollPhysics(),
+          padding: EdgeInsets.zero,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 0.78,
+          ),
+          itemCount: _posts.length,
+          itemBuilder: (context, index) {
+            final post = _posts[index] as Map<String, dynamic>;
+            final mediaUrl = (post['media_url'] ?? '').toString();
+            final hasMedia = mediaUrl.isNotEmpty;
+            final isVideo = post['media_type'] == 'video';
+            return GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PostDetailScreen(post: post),
+                  ),
+                );
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(18),
+                        ),
+                        child: Container(
+                          width: double.infinity,
+                          color: Colors.grey.shade100,
+                          child:
+                              hasMedia
+                                  ? isVideo
+                                      ? const Center(
+                                        child: Icon(
+                                          Icons.play_circle_fill,
+                                          color: Colors.black26,
+                                          size: 40,
+                                        ),
+                                      )
+                                      : Image.network(
+                                        mediaUrl,
+                                        fit: BoxFit.cover,
+                                      )
+                                  : const Icon(
+                                    Icons.article_outlined,
+                                    color: Colors.black26,
+                                    size: 40,
+                                  ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(10.0),
+                      child: Text(
+                        post['title'] ?? 'Post',
+                        style: const TextStyle(
+                          fontFamily: 'Google Sans',
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
   }
 
   Widget _buildStat(String count, String label) {

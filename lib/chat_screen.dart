@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'public_profile_screen.dart';
 
 const _socialApiChat = 'https://team.cropsync.in/cine_circle/social_api.php';
 
@@ -90,7 +91,7 @@ class _ChatScreenState extends State<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollCtrl.hasClients) {
         _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
+          0, // reversed ListView: 0 = bottom of chat
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
@@ -169,6 +170,16 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _openRecipientProfile() {
+    if (widget.recipientId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PublicProfileScreen(userId: widget.recipientId),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool hasAvatar = widget.recipientAvatar.isNotEmpty;
@@ -178,51 +189,54 @@ class _ChatScreenState extends State<ChatScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black),
-        title: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                shape: BoxShape.circle,
-                image: hasAvatar
-                    ? DecorationImage(
-                        image: NetworkImage(widget.recipientAvatar),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
+        title: GestureDetector(
+          onTap: _openRecipientProfile,
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  shape: BoxShape.circle,
+                  image: hasAvatar
+                      ? DecorationImage(
+                          image: NetworkImage(widget.recipientAvatar),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child: hasAvatar
+                    ? null
+                    : const Icon(Icons.person, color: Colors.grey, size: 20),
               ),
-              child: hasAvatar
-                  ? null
-                  : const Icon(Icons.person, color: Colors.grey, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.recipientName,
-                    style: const TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.recipientName,
+                      style: const TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black,
+                      ),
                     ),
-                  ),
-                  Text(
-                    widget.recipientRole,
-                    style: TextStyle(
-                      fontFamily: 'Google Sans',
-                      fontSize: 12,
-                      color: Colors.grey.shade600,
+                    Text(
+                      widget.recipientRole,
+                      style: TextStyle(
+                        fontFamily: 'Google Sans',
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       body: Column(
@@ -249,12 +263,16 @@ class _ChatScreenState extends State<ChatScreen> {
                   )
                 : ListView.builder(
                     controller: _scrollCtrl,
+                    reverse: true,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 24,
+                      horizontal: 16,
+                      vertical: 8,
                     ),
                     itemCount: _messages.length,
-                    itemBuilder: (_, i) => _buildBubble(_messages[i]),
+                    // reverse: true renders last item at bottom; index 0 → newest
+                    itemBuilder: (_, i) => _buildBubble(
+                      _messages[_messages.length - 1 - i],
+                    ),
                   ),
           ),
           if (_replyToMessage != null)

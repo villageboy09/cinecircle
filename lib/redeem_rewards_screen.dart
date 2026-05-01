@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -207,21 +207,32 @@ class _RedeemRewardsScreenState extends State<RedeemRewardsScreen> {
           ],
         ),
         actions: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 400),
-            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              color: Colors.black,
               borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: Row(
               children: [
-                const Icon(Icons.copyright, size: 16, color: Colors.black87),
-                const SizedBox(width: 4),
+                const Icon(Icons.copyright, size: 16, color: Colors.white),
+                const SizedBox(width: 6),
                 Text(
                   '$_balance Credits',
-                  style: const TextStyle(fontFamily: 'Google Sans', color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 13),
+                  style: const TextStyle(
+                    fontFamily: 'Google Sans',
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
                 ),
               ],
             ),
@@ -395,7 +406,9 @@ class _RedeemRewardsScreenState extends State<RedeemRewardsScreen> {
                                 color: canAfford ? Colors.black87 : Colors.red.shade400, fontWeight: FontWeight.w500),
                           ),
                           if (item['stock_label'] != null && (item['stock_label'] as String).isNotEmpty) ...[
-                            Text(' ÔÇó ', style: TextStyle(color: Colors.grey.shade500)),
+                            const SizedBox(width: 6),
+                            const Text('\u2022', style: TextStyle(color: Colors.grey, fontSize: 10)),
+                            const SizedBox(width: 6),
                             Text(item['stock_label'],
                                 style: TextStyle(fontFamily: 'Google Sans', fontSize: 12, color: Colors.grey.shade600)),
                           ],
@@ -404,15 +417,35 @@ class _RedeemRewardsScreenState extends State<RedeemRewardsScreen> {
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)),
-                              child: Text('Out of stock', style: TextStyle(fontFamily: 'Google Sans', fontSize: 10, color: Colors.red.shade700)),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade100),
+                              ),
+                              child: Text('OUT OF STOCK',
+                                  style: TextStyle(
+                                    fontFamily: 'Google Sans',
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red.shade700,
+                                  )),
                             ),
                           ] else if (isLowStock) ...[
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4)),
-                              child: Text('Only $stockQty left!', style: TextStyle(fontFamily: 'Google Sans', fontSize: 10, color: Colors.orange.shade700)),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.orange.shade100),
+                              ),
+                              child: Text('ONLY $stockQty LEFT!',
+                                  style: TextStyle(
+                                    fontFamily: 'Google Sans',
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange.shade700,
+                                  )),
                             ),
                           ],
                         ],

@@ -119,7 +119,7 @@ if ($action === 'signup') {
     }
 
     try {
-        $stmt = $pdo->prepare("SELECT id, mobile_number, full_name, password, account_type FROM cinecircle WHERE mobile_number = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, mobile_number, full_name, password, account_type, profile_image_url FROM cinecircle WHERE mobile_number = ? LIMIT 1");
         $stmt->execute([$mobile]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -132,7 +132,8 @@ if ($action === 'signup') {
                     "id" => $user['id'],
                     "full_name" => $user['full_name'],
                     "mobile_number" => $user['mobile_number'],
-                    "account_type" => $user['account_type']
+                    "account_type" => $user['account_type'],
+                    "profile_image_url" => $user['profile_image_url'] ?? ''
                 ]
             ]);
         } else {

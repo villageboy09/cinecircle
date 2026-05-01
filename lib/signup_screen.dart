@@ -98,6 +98,7 @@ class _SignupScreenState extends State<SignupScreen> {
         await prefs.setString('user_name', name);
         await prefs.setString('user_phone', phone);
         await prefs.setString('account_type', accountType);
+        await prefs.setString('user_image', '');
 
         if (!mounted) return;
         Navigator.pushReplacement(
